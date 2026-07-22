@@ -1,0 +1,14 @@
+{
+  "name": "zen",
+  "description": "Public plugins for Zen",
+  "owner": {
+    "name": "0xshawn"
+  },
+  "plugins": [
+    {
+      "name": "agent-bridge",
+      "source": "./plugins/agent-bridge",
+      "description": "Delegate bounded tasks to Zen-hosted Codex with locally approved context"
+    }
+  ]
+}

@@ -1,0 +1,39 @@
+{
+  "name": "agent-bridge",
+  "version": "0.1.0",
+  "description": "Delegate bounded tasks to Zen-hosted Codex while keeping repository context local.",
+  "author": {
+    "name": "0xshawn",
+    "url": "https://github.com/0xshawn"
+  },
+  "homepage": "https://github.com/0xshawn/zen-plugins/tree/main/plugins/agent-bridge",
+  "repository": "https://github.com/0xshawn/zen-plugins",
+  "license": "MIT",
+  "skills": "./skills/",
+  "mcpServers": {
+    "agent-bridge": {
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "./server/dist/index.js"
+      ],
+      "cwd": "."
+    }
+  },
+  "interface": {
+    "displayName": "Agent Bridge",
+    "shortDescription": "Delegate safely through Zen-hosted Codex.",
+    "longDescription": "Agent Bridge starts authenticated Zen-hosted Codex jobs, lets the local main agent approve only the context each job needs, and returns structured findings or patches for local review and verification.",
+    "developerName": "0xshawn",
+    "websiteURL": "https://zen.0xii.com",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive"
+    ],
+    "defaultPrompt": [
+      "Ask Zen Codex to review this change.",
+      "Get a second opinion without uploading my repo.",
+      "Draft a patch from explicitly shared context."
+    ]
+  }
+}
