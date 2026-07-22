@@ -26,17 +26,11 @@ chat.
 
 ### Update in Codex
 
-Version 0.1.1 renamed `agent-bridge@zen` to `zen-agent@zen`. To migrate a
-legacy Agent Bridge installation, run:
-
 ```bash
 codex plugin marketplace upgrade zen
-codex plugin remove agent-bridge@zen
+codex plugin remove zen-agent@zen
 codex plugin add zen-agent@zen
 ```
-
-If `zen-agent@zen` is already installed, omit the legacy remove command and
-reinstall only `zen-agent@zen` after upgrading the marketplace.
 
 Fully quit and restart the ChatGPT/Codex desktop application, then start a new
 chat.
@@ -56,26 +50,32 @@ Restart Claude Code or run `/reload-plugins`.
 
 ### Update in Claude Code
 
-Version 0.1.1 renamed `agent-bridge@zen` to `zen-agent@zen`. To migrate a
-legacy Agent Bridge installation, run:
-
 ```bash
 claude plugin marketplace update zen
-claude plugin uninstall agent-bridge@zen
+claude plugin uninstall zen-agent@zen
 claude plugin install zen-agent@zen
 ```
 
-If `zen-agent@zen` is already installed, omit the legacy uninstall command and
-reinstall only `zen-agent@zen` after updating the marketplace.
-
 Restart Claude Code or run `/reload-plugins`.
+
+### Optional legacy migration
+
+If you previously installed `agent-bridge@zen`, remove it once after installing
+Zen Agent:
+
+```bash
+codex plugin remove agent-bridge@zen
+claude plugin uninstall agent-bridge@zen
+```
 
 Do not enable `agent-bridge@zen` and `zen-agent@zen` together.
 
 ## Login and privacy
 
-Ask the agent to run `zen login`. Complete authentication only in the Zen
-browser page. Do not paste passwords, device codes, or session tokens into chat.
+Ask the agent to run `zen login`. Zen Agent returns a secure browser link in the
+chat. Copy the link into a browser and approve login there; the agent monitors
+the request and completes login automatically. Do not paste passwords, device
+codes, or session tokens into chat.
 
 Zen Agent sends no repository content unless the local agent explicitly
 approves context for a specific remote task.

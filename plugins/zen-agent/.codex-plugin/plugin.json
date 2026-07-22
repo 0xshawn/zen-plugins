@@ -1,6 +1,6 @@
 {
   "name": "zen-agent",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Delegate bounded tasks to Zen-hosted Codex while keeping repository context local.",
   "author": {
     "name": "0xshawn",

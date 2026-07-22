@@ -8,9 +8,9 @@ by the local agent. It does not receive automatic filesystem or Git access.
 
 ## Login
 
-Ask the agent to run `zen login`. Zen Agent opens a secure Zen browser URL,
-waits for approval, stores the resulting session in the local Zen config, and
-validates the session with `auth_status`.
+Ask the agent to run `zen login`. Zen Agent returns a secure browser link in the
+chat. Copy the link into a browser and approve login there; the agent monitors
+the request and completes login automatically.
 
 Never paste a password, device code, or session token into chat.
 

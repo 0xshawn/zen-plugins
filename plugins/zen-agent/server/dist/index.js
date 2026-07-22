@@ -13974,7 +13974,6 @@ var StdioServerTransport = class {
 };
 
 // src/index.ts
-import { randomUUID as randomUUID2 } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path2 from "node:path";
@@ -13989,7 +13988,7 @@ async function responseError(response) {
   }
   switch (response.status) {
     case 401:
-      return "Zen session missing or expired. Run `zen login` in your terminal.";
+      return "Zen session missing or expired. Run `zen login` in this chat.";
     case 402:
       return "Zen quota exceeded.";
     case 404:
@@ -14193,7 +14192,7 @@ function apiBase(config2) {
 async function loadZenSession() {
   const config2 = await readZenConfig();
   if (!config2.token) {
-    throw new Error("Zen login required. Run `zen login` in your terminal.");
+    throw new Error("Zen login required. Run `zen login` in this chat.");
   }
   return {
     token: config2.token,
@@ -14213,15 +14212,213 @@ var CONTEXT_SOURCES = [
   "other"
 ];
 
+// src/login.ts
+import { randomUUID as randomUUID2 } from "node:crypto";
+var LOGIN_WAIT_MAX_MS = 45e3;
+var LOGIN_ID_SOURCE = "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$";
+var LOGIN_ID_PATTERN = new RegExp(LOGIN_ID_SOURCE);
+var LOGIN_CANCELLED = "Zen login was cancelled.";
+var LOGIN_EXPIRED = "Device login expired. Start `zen login` again in this chat.";
+var LOGIN_NOT_FOUND = "Zen login is missing or expired. Start `zen login` again in this chat.";
+var LOGIN_ALREADY_WAITING = "Zen login is already being monitored.";
+var ZenLoginCoordinator = class {
+  constructor(deviceFactory = (baseUrl) => new ZenDeviceClient(baseUrl), waitWindowMs = LOGIN_WAIT_MAX_MS) {
+    this.deviceFactory = deviceFactory;
+    this.waitWindowMs = waitWindowMs;
+  }
+  pending = /* @__PURE__ */ new Map();
+  cleanupExpired() {
+    const now = Date.now();
+    for (const [loginId, login] of this.pending) {
+      if (login.expiresAt <= now) this.pending.delete(loginId);
+    }
+  }
+  pendingResult(loginId, login) {
+    return {
+      authenticated: false,
+      pending: true,
+      login_id: loginId,
+      verification_url: login.grant.verification_uri_complete,
+      expires_in: Math.max(0, Math.ceil((login.expiresAt - Date.now()) / 1e3))
+    };
+  }
+  async start(requestSignal) {
+    assertRequestActive(requestSignal);
+    this.cleanupExpired();
+    const config2 = await readZenConfig();
+    const device = this.deviceFactory(apiBase(config2));
+    let grant;
+    try {
+      grant = await device.startDeviceLogin(requestSignal);
+    } catch (error2) {
+      assertRequestActive(requestSignal);
+      throw error2;
+    }
+    assertRequestActive(requestSignal);
+    const loginId = randomUUID2();
+    const login = {
+      config: config2,
+      device,
+      grant,
+      expiresAt: Date.now() + grant.expires_in * 1e3,
+      waiting: false
+    };
+    this.pending.set(loginId, login);
+    return this.pendingResult(loginId, login);
+  }
+  async wait(loginId, requestSignal) {
+    assertRequestActive(requestSignal);
+    this.cleanupExpired();
+    if (!LOGIN_ID_PATTERN.test(loginId)) throw new Error(LOGIN_NOT_FOUND);
+    const login = this.pending.get(loginId);
+    if (!login) throw new Error(LOGIN_NOT_FOUND);
+    if (login.waiting) throw new Error(LOGIN_ALREADY_WAITING);
+    if (Date.now() >= login.expiresAt) {
+      this.pending.delete(loginId);
+      throw new Error(LOGIN_EXPIRED);
+    }
+    login.waiting = true;
+    const operationController = new AbortController();
+    const abortOperation = () => operationController.abort();
+    requestSignal?.addEventListener("abort", abortOperation, { once: true });
+    const windowEndsAt = Math.min(login.expiresAt, Date.now() + this.waitWindowMs);
+    const deadline = setTimeout(abortOperation, Math.max(0, windowEndsAt - Date.now()));
+    let commitAuthorized = false;
+    try {
+      while (Date.now() < windowEndsAt) {
+        const waitMs = Math.min(
+          login.grant.interval * 1e3,
+          windowEndsAt - Date.now()
+        );
+        try {
+          await delay(waitMs, operationController.signal);
+        } catch {
+          assertRequestActive(requestSignal);
+          if (Date.now() >= login.expiresAt) {
+            this.pending.delete(loginId);
+            throw new Error(LOGIN_EXPIRED);
+          }
+          if (Date.now() >= windowEndsAt) return this.pendingResult(loginId, login);
+          throw new Error(LOGIN_CANCELLED);
+        }
+        assertRequestActive(requestSignal);
+        if (Date.now() >= login.expiresAt) {
+          this.pending.delete(loginId);
+          throw new Error(LOGIN_EXPIRED);
+        }
+        if (Date.now() >= windowEndsAt) return this.pendingResult(loginId, login);
+        const pollOutcome = await observePoll(
+          login.device.pollDeviceLogin(
+            login.grant.device_code,
+            operationController.signal
+          ),
+          operationController.signal
+        );
+        if (pollOutcome.kind === "aborted") {
+          assertRequestActive(requestSignal);
+          if (Date.now() >= login.expiresAt) {
+            this.pending.delete(loginId);
+            throw new Error(LOGIN_EXPIRED);
+          }
+          if (Date.now() >= windowEndsAt) return this.pendingResult(loginId, login);
+          throw new Error(LOGIN_CANCELLED);
+        }
+        if (pollOutcome.kind === "error") {
+          if (isTerminalDeviceError(pollOutcome.error)) this.pending.delete(loginId);
+          assertRequestActive(requestSignal);
+          if (Date.now() >= login.expiresAt) {
+            this.pending.delete(loginId);
+            throw new Error(LOGIN_EXPIRED);
+          }
+          if (Date.now() >= windowEndsAt) return this.pendingResult(loginId, login);
+          throw pollOutcome.error;
+        }
+        assertRequestActive(requestSignal);
+        if (Date.now() >= login.expiresAt) {
+          this.pending.delete(loginId);
+          throw new Error(LOGIN_EXPIRED);
+        }
+        if (Date.now() >= windowEndsAt) return this.pendingResult(loginId, login);
+        const response = pollOutcome.response;
+        if ("status" in response) continue;
+        await writeZenConfig(
+          { ...login.config, token: response.token, email: response.email },
+          () => {
+            assertRequestActive(requestSignal);
+            if (Date.now() >= login.expiresAt) throw new Error(LOGIN_EXPIRED);
+            commitAuthorized = true;
+          }
+        );
+        this.pending.delete(loginId);
+        return { authenticated: true, email: response.email };
+      }
+      if (Date.now() >= login.expiresAt) {
+        this.pending.delete(loginId);
+        throw new Error(LOGIN_EXPIRED);
+      }
+      return this.pendingResult(loginId, login);
+    } catch (error2) {
+      if (!commitAuthorized) assertRequestActive(requestSignal);
+      if (error2 instanceof Error && error2.message === LOGIN_EXPIRED) {
+        this.pending.delete(loginId);
+      }
+      throw error2;
+    } finally {
+      clearTimeout(deadline);
+      requestSignal?.removeEventListener("abort", abortOperation);
+      if (this.pending.get(loginId) === login) login.waiting = false;
+    }
+  }
+};
+function assertRequestActive(signal) {
+  if (signal?.aborted) throw new Error(LOGIN_CANCELLED);
+}
+function delay(milliseconds, signal) {
+  if (signal.aborted) return Promise.reject(new Error(LOGIN_CANCELLED));
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, milliseconds);
+    const onAbort = () => {
+      clearTimeout(timeout);
+      reject(new Error(LOGIN_CANCELLED));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+function observePoll(poll, signal) {
+  return new Promise((resolve) => {
+    const onAbort = () => {
+      queueMicrotask(() => resolve({ kind: "aborted" }));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    void poll.then(
+      (response) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve({ kind: "response", response });
+      },
+      (error2) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve({ kind: "error", error: error2 });
+      }
+    );
+  });
+}
+function isTerminalDeviceError(error2) {
+  return error2 instanceof Error && [
+    "Device login expired. Start Zen login again.",
+    "Device login was not found. Start Zen login again.",
+    "Device login was already completed. Start Zen login again."
+  ].includes(error2.message);
+}
+
 // src/index.ts
 var SERVER_NAME = "zen-agent";
 var TASK_MAX_BYTES = 32 * 1024;
 var CONTEXT_ITEM_MAX_BYTES = 64 * 1024;
 var CONTEXT_PAYLOAD_MAX_BYTES = 256 * 1024;
-var URL_ELICITATION_REQUIRED = "Zen login requires MCP URL elicitation. Use `zen login` in the integrated terminal.";
-var ELICITATION_FAILED = "Zen login could not open the secure verification page. Try again.";
-var LOGIN_CANCELLED = "Zen login was cancelled.";
-var LOGIN_EXPIRED = "Device login expired. Start Zen login again.";
+var zenLoginCoordinator = new ZenLoginCoordinator();
 function byteLength(value) {
   return Buffer.byteLength(value, "utf8");
 }
@@ -14265,98 +14462,10 @@ async function client() {
   const session = await loadZenSession();
   return { api: new ZenAgentClient(session.baseUrl, session.token), email: session.email };
 }
-function delay(milliseconds, signal) {
-  if (signal.aborted) return Promise.reject(new Error(LOGIN_CANCELLED));
-  return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      signal.removeEventListener("abort", onAbort);
-      resolve();
-    }, milliseconds);
-    const onAbort = () => {
-      clearTimeout(timeout);
-      reject(new Error(LOGIN_CANCELLED));
-    };
-    signal.addEventListener("abort", onAbort, { once: true });
-  });
-}
-function isUnsupportedElicitation(error2) {
-  return error2 instanceof Error && /client does not support (?:url )?elicitation/i.test(error2.message);
-}
-function assertLoginActive(requestSignal, expiresAt) {
-  if (requestSignal?.aborted) throw new Error(LOGIN_CANCELLED);
-  if (Date.now() >= expiresAt) throw new Error(LOGIN_EXPIRED);
-}
-function notifyElicitationComplete(notifyComplete) {
-  try {
-    void notifyComplete().catch(() => void 0);
-  } catch {
-  }
-}
-async function handleZenLogin(args = {}, host, requestSignal) {
-  assertAllowedKeys(args, []);
-  const config2 = await readZenConfig();
-  const device = new ZenDeviceClient(apiBase(config2));
-  let grant;
-  try {
-    grant = await device.startDeviceLogin(requestSignal);
-  } catch (error2) {
-    if (requestSignal?.aborted) throw new Error(LOGIN_CANCELLED);
-    throw error2;
-  }
-  const expiresAt = Date.now() + grant.expires_in * 1e3;
-  const elicitationId = randomUUID2();
-  const operationController = new AbortController();
-  const abortOperation = () => operationController.abort();
-  if (requestSignal?.aborted) abortOperation();
-  else requestSignal?.addEventListener("abort", abortOperation, { once: true });
-  const deadline = setTimeout(abortOperation, Math.max(0, expiresAt - Date.now()));
-  let accepted = false;
-  let commitAuthorized = false;
-  let notifyComplete;
-  try {
-    assertLoginActive(requestSignal, expiresAt);
-    let action;
-    try {
-      notifyComplete = host.createElicitationCompletionNotifier(elicitationId);
-      ({ action } = await host.elicitInput({
-        mode: "url",
-        message: "Open Zen to complete login securely.",
-        url: grant.verification_uri_complete,
-        elicitationId
-      }, { signal: operationController.signal }));
-    } catch (error2) {
-      assertLoginActive(requestSignal, expiresAt);
-      if (isUnsupportedElicitation(error2)) throw new Error(URL_ELICITATION_REQUIRED);
-      throw new Error(ELICITATION_FAILED);
-    }
-    if (action !== "accept") return { authenticated: false, cancelled: true };
-    accepted = true;
-    assertLoginActive(requestSignal, expiresAt);
-    const intervalMilliseconds = grant.interval * 1e3;
-    while (Date.now() < expiresAt) {
-      await delay(Math.min(intervalMilliseconds, expiresAt - Date.now()), operationController.signal);
-      assertLoginActive(requestSignal, expiresAt);
-      const response = await device.pollDeviceLogin(grant.device_code, operationController.signal);
-      assertLoginActive(requestSignal, expiresAt);
-      if ("status" in response) continue;
-      await writeZenConfig(
-        { ...config2, token: response.token, email: response.email },
-        () => {
-          assertLoginActive(requestSignal, expiresAt);
-          commitAuthorized = true;
-        }
-      );
-      return { authenticated: true, email: response.email };
-    }
-    throw new Error(LOGIN_EXPIRED);
-  } catch (error2) {
-    if (!commitAuthorized) assertLoginActive(requestSignal, expiresAt);
-    throw error2;
-  } finally {
-    clearTimeout(deadline);
-    requestSignal?.removeEventListener("abort", abortOperation);
-    if (accepted && notifyComplete) notifyElicitationComplete(notifyComplete);
-  }
+async function handleZenLogin(args = {}, requestSignal, coordinator = zenLoginCoordinator) {
+  assertAllowedKeys(args, ["login_id"]);
+  if (args.login_id === void 0) return coordinator.start(requestSignal);
+  return coordinator.wait(requiredString(args.login_id, "login_id"), requestSignal);
 }
 async function handleAuthStatus(args = {}) {
   assertAllowedKeys(args, []);
@@ -14423,12 +14532,18 @@ var contextItemSchema = {
 var toolDefinitions = [
   {
     name: "zen_login",
-    description: "Authenticate to Zen through secure MCP URL elicitation.",
-    inputSchema: { type: "object", properties: {}, additionalProperties: false }
+    description: "Return a secure Zen browser login link and monitor approval.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        login_id: { type: "string", pattern: LOGIN_ID_SOURCE }
+      },
+      additionalProperties: false
+    }
   },
   {
     name: "auth_status",
-    description: "Validate the existing Zen CLI session and report quota usage.",
+    description: "Validate the existing Zen session and report quota usage.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false }
   },
   {
@@ -14509,7 +14624,7 @@ async function main() {
       let result;
       switch (request.params.name) {
         case "zen_login":
-          result = await handleZenLogin(args, server, extra.signal);
+          result = await handleZenLogin(args, extra.signal);
           break;
         case "auth_status":
           result = await handleAuthStatus(args);
