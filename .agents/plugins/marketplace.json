@@ -5,10 +5,10 @@
   },
   "plugins": [
     {
-      "name": "agent-bridge",
+      "name": "zen-agent",
       "source": {
         "source": "local",
-        "path": "./plugins/agent-bridge"
+        "path": "./plugins/zen-agent"
       },
       "policy": {
         "installation": "AVAILABLE",

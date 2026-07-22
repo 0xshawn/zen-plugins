@@ -6,8 +6,8 @@
   },
   "plugins": [
     {
-      "name": "agent-bridge",
-      "source": "./plugins/agent-bridge",
+      "name": "zen-agent",
+      "source": "./plugins/zen-agent",
       "description": "Delegate bounded tasks to Zen-hosted Codex with locally approved context"
     }
   ]

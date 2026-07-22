@@ -1,11 +1,11 @@
 ---
-name: agent-bridge
-description: Use when delegating review, analysis, or patch drafting to the Zen-hosted Codex agent while keeping the repository and context authorization local.
+name: zen-agent
+description: Use when delegating review, analysis, or patch drafting through Zen Agent while keeping the repository and context authorization local.
 ---
 
-# Agent Bridge
+# Zen Agent
 
-Delegate a bounded task to Zen's hosted Codex identity. Agent Bridge never uploads,
+Delegate a bounded task to Zen's hosted Codex identity. Zen Agent never uploads,
 clones, mounts, or synchronizes the local repository. The remote agent starts in an
 empty workspace and sees only the task and context that the local main agent explicitly sends.
 
@@ -22,7 +22,7 @@ empty workspace and sees only the task and context that the local main agent exp
 ## Workflow
 
 1. Call `auth_status`. If it reports a missing or expired session, use the
-   `zen-login` skill. Never collect credentials through Agent Bridge.
+   `zen-login` skill. Never collect credentials through Zen Agent.
 2. Form a narrow task. Include only useful initial context, within these limits:
    task 32 KiB, each item 64 KiB, one payload 256 KiB, and 1 MiB total per job.
 3. Call `start_agent(task, initial_context?)` and retain the returned `job_id`.

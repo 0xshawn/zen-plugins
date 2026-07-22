@@ -1,6 +1,6 @@
 {
-  "name": "agent-bridge-server",
-  "version": "0.1.0",
+  "name": "zen-agent-server",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
   "main": "dist/index.js",

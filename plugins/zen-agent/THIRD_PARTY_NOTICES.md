@@ -1,4 +1,4 @@
-# Agent Bridge Third-Party Notices
+# Zen Agent Third-Party Notices
 
 This distribution includes 8 third-party packages.
 

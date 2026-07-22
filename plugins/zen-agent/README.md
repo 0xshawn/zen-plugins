@@ -1,6 +1,6 @@
-# Zen Agent Bridge
+# Zen Agent
 
-Agent Bridge lets Codex and Claude Code delegate bounded tasks to a
+Zen Agent lets Codex and Claude Code delegate bounded tasks to a
 Zen-hosted Codex agent while keeping the customer repository local.
 
 The remote agent receives only the task and context items explicitly approved
@@ -8,7 +8,7 @@ by the local agent. It does not receive automatic filesystem or Git access.
 
 ## Login
 
-Ask the agent to run `zen login`. Agent Bridge opens a secure Zen browser URL,
+Ask the agent to run `zen login`. Zen Agent opens a secure Zen browser URL,
 waits for approval, stores the resulting session in the local Zen config, and
 validates the session with `auth_status`.
 
@@ -37,5 +37,5 @@ Open an issue at https://github.com/0xshawn/zen-plugins/issues.
 
 ## License
 
-Agent Bridge is licensed under the MIT License. Bundled third-party software
+Zen Agent is licensed under the MIT License. Bundled third-party software
 notices are in [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md).

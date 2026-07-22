@@ -1,0 +1,12 @@
+{
+  "name": "zen-agent",
+  "version": "0.1.1",
+  "description": "Zen Agent delegates bounded tasks to Zen-hosted Codex with locally approved context",
+  "author": {
+    "name": "0xshawn",
+    "url": "https://github.com/0xshawn"
+  },
+  "homepage": "https://github.com/0xshawn/zen-plugins/tree/main/plugins/zen-agent",
+  "repository": "https://github.com/0xshawn/zen-plugins",
+  "license": "MIT"
+}

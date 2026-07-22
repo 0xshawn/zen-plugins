@@ -14214,6 +14214,7 @@ var CONTEXT_SOURCES = [
 ];
 
 // src/index.ts
+var SERVER_NAME = "zen-agent";
 var TASK_MAX_BYTES = 32 * 1024;
 var CONTEXT_ITEM_MAX_BYTES = 64 * 1024;
 var CONTEXT_PAYLOAD_MAX_BYTES = 256 * 1024;
@@ -14498,7 +14499,7 @@ async function main() {
     readFileSync(new URL("../package.json", import.meta.url), "utf8")
   );
   const server = new Server(
-    { name: "agent-bridge", version: packageMetadata.version },
+    { name: SERVER_NAME, version: packageMetadata.version },
     { capabilities: { tools: {} } }
   );
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [...toolDefinitions] }));
@@ -14545,12 +14546,13 @@ async function main() {
 var invokedPath = process.argv[1] ? path2.resolve(process.argv[1]) : "";
 if (invokedPath === fileURLToPath(import.meta.url)) {
   main().catch((error2) => {
-    process.stderr.write(`agent-bridge: ${error2 instanceof Error ? error2.message : String(error2)}
+    process.stderr.write(`${SERVER_NAME}: ${error2 instanceof Error ? error2.message : String(error2)}
 `);
     process.exitCode = 1;
   });
 }
 export {
+  SERVER_NAME,
   handleAgentResult,
   handleAgentStatus,
   handleAuthStatus,

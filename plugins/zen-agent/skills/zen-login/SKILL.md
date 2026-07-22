@@ -1,21 +1,21 @@
 ---
 name: zen-login
-description: Use when the user asks to log in to Zen or Agent Bridge reports a missing or expired Zen session.
+description: Use when the user asks to log in to Zen or Zen Agent reports a missing or expired Zen session.
 ---
 
 # Zen login
 
-Authenticate through Agent Bridge's secure MCP URL elicitation. The device code,
+Authenticate through Zen Agent's secure MCP URL elicitation. The device code,
 session token, email, and password must never become model-visible MCP arguments.
 
 ## Workflow
 
-1. Call Agent Bridge `zen_login` with no arguments.
+1. Call Zen Agent `zen_login` with no arguments.
 2. Let the MCP client present the URL elicitation and let the user complete login in
    the browser. Do not ask the user to copy a device code or session token into chat.
-3. When `zen_login` reports authentication succeeded, call Agent Bridge `auth_status`
+3. When `zen_login` reports authentication succeeded, call Zen Agent `auth_status`
    to validate the stored session and report quota usage.
-4. If Agent Bridge reports that MCP URL elicitation is unsupported, use the integrated
+4. If Zen Agent reports that MCP URL elicitation is unsupported, use the integrated
    terminal fallback. Check whether `zen` is installed and, if needed, tell the user to
    install it:
 
@@ -33,6 +33,6 @@ session token, email, and password must never become model-visible MCP arguments
    repeat this workflow. Do not attempt a password-based MCP call.
 
 The CLI stores the session at `$XDG_CONFIG_HOME/zen/config.json`, or
-`~/.config/zen/config.json` when `XDG_CONFIG_HOME` is unset. Agent Bridge reads that
+`~/.config/zen/config.json` when `XDG_CONFIG_HOME` is unset. Zen Agent reads that
 same file. Both the CLI and `zen_login` use this shared session; there is no separate
 plugin credential store or provider API key.
