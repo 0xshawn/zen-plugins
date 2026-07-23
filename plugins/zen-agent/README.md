@@ -3,14 +3,28 @@
 Zen Agent lets Codex and Claude Code delegate bounded tasks to a
 Zen-hosted Codex agent while keeping the customer repository local.
 
-The remote agent receives only the task and context items explicitly approved
-by the local agent. It does not receive automatic filesystem or Git access.
+The remote agent receives the delegated task text and only context items
+selected by the local agent. Sensitive or out-of-repository context requires
+explicit user confirmation. It does not receive automatic filesystem or Git
+access.
+
+## Use with Codex
+
+For the complete Codex guide, see
+[Quickstart in Codex](../../README.md#quickstart-in-codex). It covers
+installation, restart, login, delegation, context authorization, and updates.
 
 ## Login
 
-Ask the agent to run `zen login`. Zen Agent returns a secure browser link in the
-chat. Copy the link into a browser and approve login there; the agent monitors
-the request and completes login automatically.
+Ask Codex in chat, for example:
+
+```text
+Log me in to Zen Agent.
+```
+
+Codex invokes the `zen_login` plugin tool; do not type `zen_login` in a
+terminal. Open the secure browser link returned in chat and approve the request.
+Codex monitors the approval and confirms when authentication is complete.
 
 Never paste a password, device code, or session token into chat.
 
