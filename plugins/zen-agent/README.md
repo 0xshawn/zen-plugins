@@ -1,7 +1,9 @@
 # Zen Agent
 
 Zen Agent lets Codex and Claude Code delegate bounded tasks to a
-Zen-hosted Codex agent while keeping the customer repository local.
+Zen-hosted agent while keeping the customer repository local. Codex is the
+default remote agent, and Claude can be selected for an individual `start_agent`
+task.
 
 The remote agent receives the delegated task text and only context items
 selected by the local agent. Sensitive or out-of-repository context requires

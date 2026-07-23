@@ -14097,7 +14097,12 @@ var ZenAgentClient = class {
     return this.request("/api/user/usage");
   }
   startAgent(body) {
-    return this.request("/api/agent/jobs", { method: "POST", body: JSON.stringify(body) });
+    const payload = {
+      task: body.task,
+      initial_context: body.initial_context,
+      agent: body.agent
+    };
+    return this.request("/api/agent/jobs", { method: "POST", body: JSON.stringify(payload) });
   }
   agentStatus(jobId) {
     return this.request(`/api/agent/jobs/${encodeURIComponent(jobId)}`);
@@ -14426,6 +14431,10 @@ function requiredString(value, name) {
   if (typeof value !== "string" || value.length === 0) throw new Error(`${name} must be a non-empty string`);
   return value;
 }
+function requiredAgentKind(value) {
+  if (value !== "codex" && value !== "claude") throw new Error("agent must be codex or claude");
+  return value;
+}
 function assertAllowedKeys(args, allowed) {
   const unexpected = Object.keys(args).find((key) => !allowed.includes(key));
   if (unexpected) throw new Error(`unexpected argument: ${unexpected}`);
@@ -14474,14 +14483,20 @@ async function handleAuthStatus(args = {}) {
   return { authenticated: true, email: email2, ...usage };
 }
 async function handleStartAgent(args) {
-  assertAllowedKeys(args, ["task", "initial_context"]);
+  assertAllowedKeys(args, ["task", "initial_context", "agent"]);
   const task = requiredString(args.task, "task");
   if (byteLength(task) > TASK_MAX_BYTES) throw new Error("task exceeds 32 KiB");
   const initialContext = validateContextItems(args.initial_context);
-  const body = { task, initial_context: initialContext };
+  const agent = args.agent === void 0 ? "codex" : requiredAgentKind(args.agent);
+  const body = { task, initial_context: initialContext, agent };
   validatePayload(body);
   const { api } = await client();
-  return api.startAgent(body);
+  const created = await api.startAgent(body);
+  if (agent === "claude" && created.agent !== "claude") {
+    await api.cancelAgent(created.job_id).catch(() => void 0);
+    throw new Error("Zen server does not support Claude jobs yet.");
+  }
+  return { ...created, agent: created.agent ?? "codex" };
 }
 async function handleAgentStatus(args) {
   assertAllowedKeys(args, ["job_id"]);
@@ -14548,12 +14563,13 @@ var toolDefinitions = [
   },
   {
     name: "start_agent",
-    description: "Start a Zen-hosted Codex job with only explicitly supplied context.",
+    description: "Start a Zen-hosted agent job with only explicitly supplied context.",
     inputSchema: {
       type: "object",
       properties: {
         task: { type: "string", description: "Agent task, maximum 32 KiB." },
-        initial_context: { type: "array", items: contextItemSchema }
+        initial_context: { type: "array", items: contextItemSchema },
+        agent: { type: "string", enum: ["codex", "claude"] }
       },
       required: ["task"],
       additionalProperties: false
