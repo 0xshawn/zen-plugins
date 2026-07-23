@@ -1,0 +1,58 @@
+import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
+const pluginRoot = fileURLToPath(new URL('../../../', import.meta.url));
+
+function skill(name: string): string {
+  return readFileSync(`${pluginRoot}/skills/${name}/SKILL.md`, 'utf8');
+}
+
+describe('Zen Agent skills', () => {
+  it('keeps Zen login in chat without exposing credentials', () => {
+    const content = skill('zen-login');
+    const forbiddenFallback = new RegExp([
+      'integrated' + String.raw`\s+terminal`,
+      'npm install -g' + String.raw`\s+zen-ai`,
+      'URL' + String.raw`\s+elicitation`,
+      'shell',
+      'PTY',
+    ].join('|'), 'i');
+    for (const required of [
+      'zen_login',
+      'verification_url',
+      'login_id',
+      'Markdown link',
+      'pending',
+      'auth_status',
+    ]) expect(content).toContain(required);
+    expect(content).toMatch(/repeat.*zen_login.*pending/is);
+    expect(content).toMatch(/never.*email.*password|never.*password.*email/is);
+    expect(content).not.toMatch(forbiddenFallback);
+  });
+
+  it('documents the context-only remote agent workflow', () => {
+    const content = skill('zen-agent');
+    for (const tool of [
+      'auth_status',
+      'start_agent',
+      'agent_status',
+      'provide_context',
+      'agent_result',
+      'cancel_agent',
+      'list_agents',
+    ]) {
+      expect(content).toContain(tool);
+    }
+    expect(content).toMatch(/never (uploads|upload|mounts|mount|clones|clone)/i);
+    expect(content).toMatch(/ordinary.*repository.*automatic|automatically.*ordinary.*repository/is);
+    expect(content).toMatch(/reason.*path.*before.*approval/is);
+    for (const sensitive of ['.env', 'private key', 'credential', '.ssh', '.codex', 'outside', 'binary', 'archive', 'oversized']) {
+      expect(content.toLowerCase()).toContain(sensitive);
+    }
+    expect(content).toMatch(/8 context rounds/i);
+    expect(content).toMatch(/apply.*patch.*local|patch.*appl.*local/is);
+    expect(content).toMatch(/run.*test.*local|local.*test/is);
+    expect(content).toMatch(/cancel_agent/);
+  });
+});

@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  zen-agent:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: plugins/zen-agent/server/package-lock.json
+      - name: Install dependencies
+        working-directory: plugins/zen-agent/server
+        run: npm ci
+      - name: Test client
+        working-directory: plugins/zen-agent/server
+        run: npm test
+      - name: Build bundle
+        working-directory: plugins/zen-agent/server
+        run: npm run build
+      - name: Check third-party notices
+        working-directory: plugins/zen-agent/server
+        run: npm run notices:check
+      - name: Test release and security tooling
+        working-directory: plugins/zen-agent/server
+        run: npm run test:release
+      - name: Check generated and formatted files
+        run: |
+          git diff --exit-code -- plugins/zen-agent/server/dist/index.js plugins/zen-agent/THIRD_PARTY_NOTICES.md
+          git diff --check

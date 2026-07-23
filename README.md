@@ -1,7 +1,9 @@
 # Zen Plugins
 
-Public plugins for Zen. The Zen product source repository remains private;
-this repository contains only installable plugin artifacts.
+Public plugins for Zen. This repository contains the installable Zen Agent
+plugin, its TypeScript client source, tests, build tooling, and release/security
+checks. Zen backend and hosted runner implementation remain outside this
+repository.
 
 ## Zen Agent
 
@@ -13,6 +15,29 @@ repository access and context authorization local.
 - Node.js 20 or newer
 - A current Codex or Claude Code installation
 - Network access to `https://zen.0xii.com`
+
+### Development
+
+Build and verify the public client from source:
+
+```bash
+cd plugins/zen-agent/server
+npm ci
+npm test
+npm run build
+npm run notices:check
+npm run test:release
+```
+
+Prepare a later stable release from the repository root with:
+
+```bash
+node plugins/zen-agent/scripts/release.mjs --version X.Y.Z
+```
+
+The release command synchronizes public metadata and runs the complete local
+test, build, validator, and security gate. See [AGENTS.md](AGENTS.md) for the
+development and release contract.
 
 ### Install in Codex
 

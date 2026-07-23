@@ -4,7 +4,22 @@
   "private": true,
   "type": "module",
   "main": "dist/index.js",
-  "engines": {
-    "node": ">=20"
+  "scripts": {
+    "build": "tsc --noEmit && node scripts/build.mjs",
+    "dev": "tsc --watch",
+    "notices": "node scripts/generate-third-party-notices.mjs",
+    "notices:check": "node scripts/generate-third-party-notices.mjs --check",
+    "test": "vitest run",
+    "test:release": "node --test ../scripts/release.test.mjs && node ../scripts/security-scan.mjs",
+    "security:check": "node ../scripts/security-scan.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "esbuild": "^0.21.5",
+    "typescript": "^5.0.0",
+    "vitest": "^2.0.0"
   }
 }
