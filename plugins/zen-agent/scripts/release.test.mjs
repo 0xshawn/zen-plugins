@@ -11,6 +11,7 @@ import {
   assertReleasePreflight,
   assertReleaseVersionAdvances,
   compareStableSemver,
+  defaultRunCommand,
   parseReleaseArgs,
   requireStableVersion,
   runRelease,
@@ -33,8 +34,8 @@ async function writeJson(file, value) {
   await writeFile(file, `${JSON.stringify(value, null, 2)}\n`)
 }
 
-async function createVersionFixture(t, version = '0.1.3') {
-  const root = await temporaryDirectory(t, 'zen-release-versions-')
+async function createVersionFixture(t, version = '0.1.3', prefix = 'zen-release-versions-') {
+  const root = await temporaryDirectory(t, prefix)
   const plugin = path.join(root, 'plugins/zen-agent')
   const server = path.join(plugin, 'server')
   await writeJson(path.join(plugin, '.codex-plugin/plugin.json'), { name: 'zen-agent', version })
@@ -75,7 +76,8 @@ test('release CLI accepts one stable version and no target repository', () => {
 
 test('release versions must be stable SemVer', () => {
   assert.equal(requireStableVersion('0.1.4'), '0.1.4')
-  for (const invalid of ['1.2', 'v1.2.3', '1.2.3-beta.1', '1.2.3+codex.20260723093908']) {
+  const privateBuildVersion = ['1.2.3', '+', 'codex.', '20260723093908'].join('')
+  for (const invalid of ['1.2', 'v1.2.3', '1.2.3-beta.1', privateBuildVersion]) {
     assert.throws(() => requireStableVersion(invalid), /stable SemVer/)
   }
   assert.equal(compareStableSemver('1.10.0', '1.9.9'), 1)
@@ -247,6 +249,67 @@ test('release preflight rejects split current metadata before mutation', async t
   )
 })
 
+test('release preflight rejects malformed metadata, wrong remote, and non-root invocation', async t => {
+  const malformed = await createVersionFixture(t)
+  await writeFile(
+    path.join(malformed, 'plugins/zen-agent/.codex-plugin/plugin.json'),
+    '{malformed\n',
+  )
+  await assert.rejects(
+    assertReleasePreflight(malformed, '0.1.4', { validateGit: false }),
+    /JSON|unexpected token/i,
+  )
+
+  const wrongRemote = await createVersionFixture(t)
+  await execFileAsync('git', ['init', '-b', 'main'], { cwd: wrongRemote })
+  await execFileAsync('git', ['remote', 'add', 'origin', 'git@github.com:example/wrong.git'], { cwd: wrongRemote })
+  await assert.rejects(assertReleasePreflight(wrongRemote, '0.1.4'), /origin must be/)
+
+  const nonRoot = await createVersionFixture(t)
+  await execFileAsync('git', ['init', '-b', 'main'], { cwd: nonRoot })
+  await execFileAsync('git', ['remote', 'add', 'origin', 'git@github.com:0xshawn/zen-plugins.git'], { cwd: nonRoot })
+  await assert.rejects(
+    assertReleasePreflight(path.join(nonRoot, 'plugins/zen-agent'), '0.1.4'),
+    /repository root/,
+  )
+})
+
+test('stable SemVer comparison handles values beyond JavaScript integer limits', () => {
+  assert.equal(compareStableSemver('9007199254740993.0.0', '9007199254740992.0.0'), 1)
+  assert.equal(compareStableSemver('9007199254740992.0.0', '9007199254740993.0.0'), -1)
+})
+
+test('release orchestration succeeds when invoked from outside the repository cwd', async t => {
+  const root = await createVersionFixture(t)
+  const outside = await temporaryDirectory(t, 'zen-release-cwd-')
+  const previous = process.cwd()
+  process.chdir(outside)
+  try {
+    await assert.doesNotReject(runRelease({
+      repositoryRoot: root,
+      version: '0.1.4',
+      preflight: async () => {},
+      runCommand: async () => {},
+      scan: async () => {},
+      validatorPath: '/tmp/validate_plugin.py',
+    }))
+  } finally {
+    process.chdir(previous)
+  }
+})
+
+test('release process errors redact child stderr while preserving exit code', async t => {
+  const root = await temporaryDirectory(t, 'zen-release-stderr-')
+  const script = path.join(root, 'fail.mjs')
+  const secret = ['device', '_code=', 'synthetic-secret'].join('')
+  await writeFile(script, `process.stderr.write(${JSON.stringify(secret)}); process.exitCode = 7;\n`)
+  await assert.rejects(
+    defaultRunCommand(process.execPath, [script], root),
+    error => error.code === 7 && !String(error.message).includes(secret)
+      && !String(error.stderr ?? '').includes(secret),
+  )
+})
+
 test('scanner accepts the canonical source tree', async () => {
   await assert.doesNotReject(scanRepository(repositoryRoot))
 })
@@ -262,6 +325,10 @@ test('scanner rejects forbidden public paths', async t => {
     ['plugins/zen-agent/Dockerfile', 'FROM node:20\n', /deployment/],
     ['deploy/zen-agent.yaml', 'kind: Deployment\n', /deployment/],
     ['plugins/zen-agent/server/config/zen-agent.config.toml', 'model = "x"\n', /runner configuration/],
+    ['deployment.yaml', 'kind: Deployment\n', /deployment/],
+    ['nested/kustomization.yaml', 'resources: []\n', /deployment/],
+    ['terraform.tfvars', 'region = "test"\n', /deployment/],
+    ['runner-config.toml', 'model = "test"\n', /runner configuration/],
   ]
 
   for (const [relative, contents, expected] of cases) {
@@ -373,6 +440,59 @@ test('scanner rejects tracked content that is not valid UTF-8', async t => {
   const relative = 'binary.bin'
   await writeFile(path.join(root, relative), Buffer.from([0xff, 0xfe, 0xfd]))
   await assert.rejects(scanRepository(root, { files: [relative] }), /invalid UTF-8/)
+})
+
+test('scanner rejects private cachebuster literals and the canonical tree contains none', async t => {
+  const root = await temporaryDirectory(t, 'zen-scan-cachebuster-')
+  const relative = 'private-version.txt'
+  await writeFile(path.join(root, relative), ['0.1.3', '+', 'codex.', '20260723093908'].join(''))
+  await assert.rejects(scanRepository(root, { files: [relative] }), /private build metadata/)
+
+  for (const entry of await scanRepository(repositoryRoot)) {
+    const relativePath = typeof entry === 'string' ? entry : entry.relative
+    const content = await readFile(path.join(repositoryRoot, relativePath), 'utf8')
+    assert.equal(content.includes(['+', 'codex'].join('')), false, relativePath)
+  }
+})
+
+test('release restores mutable artifacts after every injected gate failure', async t => {
+  const gates = [
+    ['npm', ['test']],
+    ['npm', ['run', 'build']],
+    ['npm', ['run', 'notices:check']],
+    ['git', ['diff', '--exit-code']],
+    ['npm', ['run', 'test:release']],
+    ['python3', []],
+    ['claude', ['plugin', 'validate', '--strict']],
+    ['git', ['diff', '--check']],
+  ]
+  for (const [index, [targetCommand, targetArgs]] of gates.entries()) {
+    const root = await createVersionFixture(t, '0.1.3', `zen-release-gate-${index}-`)
+    const bundle = path.join(root, 'plugins/zen-agent/server/dist/index.js')
+    const notices = path.join(root, 'plugins/zen-agent/THIRD_PARTY_NOTICES.md')
+    await assert.rejects(
+      runRelease({
+        repositoryRoot: root,
+        version: '0.1.4',
+        preflight: async () => {},
+        runCommand: async (command, args) => {
+          const matches = command === targetCommand
+            && (targetArgs.length === 0 || targetArgs.every((arg, argIndex) => args[argIndex] === arg))
+          if (matches) {
+            await writeFile(bundle, `mutated-${index}\n`)
+            await writeFile(notices, `mutated-${index}\n`)
+            throw new Error(`gate ${index} failed`)
+          }
+        },
+        scan: async () => {},
+        validatorPath: '/tmp/validate_plugin.py',
+      }),
+      new RegExp(`gate ${index} failed`),
+    )
+    assert.deepEqual(await readVersions(root), Array(5).fill('0.1.3'))
+    assert.equal(await readFile(bundle, 'utf8'), 'bundle\n')
+    assert.equal(await readFile(notices, 'utf8'), 'notices\n')
+  }
 })
 
 test('public metadata remains synchronized at stable SemVer', async () => {

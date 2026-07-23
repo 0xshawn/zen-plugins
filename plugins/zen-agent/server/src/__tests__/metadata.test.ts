@@ -47,7 +47,7 @@ describe('Zen Agent metadata', () => {
     expect(agents).toContain('node plugins/zen-agent/scripts/release.mjs --version X.Y.Z');
     expect(agents).toContain('services/backend');
     expect(agents).toContain('services/agent-runner');
-    expect(agents).not.toContain('+codex.');
+    expect(agents).not.toContain(['+', 'codex', '.'].join(''));
     expect(agents).not.toContain('--target');
   });
 

@@ -161,13 +161,17 @@ export async function synchronizedVersions(repositoryRoot) {
 }
 
 async function runGit(repositoryRoot, args, options = {}) {
-  const { stdout } = await execFileAsync('git', args, {
-    cwd: repositoryRoot,
-    encoding: 'utf8',
-    maxBuffer: 20 * 1024 * 1024,
-    ...options,
-  })
-  return stdout.trim()
+  try {
+    const { stdout } = await execFileAsync('git', args, {
+      cwd: repositoryRoot,
+      encoding: 'utf8',
+      maxBuffer: 20 * 1024 * 1024,
+      ...options,
+    })
+    return stdout.trim()
+  } catch (error) {
+    throw sanitizeProcessError('git', error)
+  }
 }
 
 export async function assertReleasePreflight(
@@ -176,49 +180,50 @@ export async function assertReleasePreflight(
   { validateGit = true, validateRemoteTag = true, runGitCommand = runGit } = {},
 ) {
   requireStableVersion(requested)
+  if (validateGit) {
+    const actualRoot = await runGitCommand(repositoryRoot, ['rev-parse', '--show-toplevel'])
+    if (path.resolve(actualRoot) !== path.resolve(repositoryRoot)) {
+      throw new Error('release must run from the repository root')
+    }
+    const remote = await runGitCommand(repositoryRoot, ['remote', 'get-url', 'origin'])
+    if (![
+      'git@github.com:0xshawn/zen-plugins.git',
+      'https://github.com/0xshawn/zen-plugins.git',
+      'https://github.com/0xshawn/zen-plugins',
+    ].includes(remote)) {
+      throw new Error('origin must be the public zen-plugins repository')
+    }
+    if (await runGitCommand(repositoryRoot, ['branch', '--show-current']) !== 'main') {
+      throw new Error('release branch must be main')
+    }
+    if (await runGitCommand(repositoryRoot, ['status', '--porcelain'])) {
+      throw new Error('release repository must be clean')
+    }
+    const tag = `zen-agent-v${requested}`
+    let localTagExists = false
+    try {
+      await runGitCommand(repositoryRoot, ['show-ref', '--verify', '--quiet', `refs/tags/${tag}`])
+      localTagExists = true
+    } catch (error) {
+      if (error?.code !== 1) throw error
+    }
+    if (localTagExists) throw new Error(`release tag already exists: ${tag}`)
+    if (validateRemoteTag) {
+      try {
+        const remoteTag = await runGitCommand(
+          repositoryRoot,
+          ['ls-remote', '--exit-code', 'origin', `refs/tags/${tag}`],
+        )
+        if (remoteTag) throw new Error(`release tag already exists on origin: ${tag}`)
+      } catch (error) {
+        if (error?.code !== 2) throw error
+      }
+    }
+  }
+
   const current = await synchronizedVersions(repositoryRoot)
   if (compareStableSemver(requested, current) <= 0) {
     throw new Error(`release version must advance beyond ${current}`)
-  }
-  if (!validateGit) return
-
-  const actualRoot = await runGitCommand(repositoryRoot, ['rev-parse', '--show-toplevel'])
-  if (path.resolve(actualRoot) !== path.resolve(repositoryRoot)) {
-    throw new Error('release must run from the repository root')
-  }
-  const remote = await runGitCommand(repositoryRoot, ['remote', 'get-url', 'origin'])
-  if (![
-    'git@github.com:0xshawn/zen-plugins.git',
-    'https://github.com/0xshawn/zen-plugins.git',
-    'https://github.com/0xshawn/zen-plugins',
-  ].includes(remote)) {
-    throw new Error('origin must be the public zen-plugins repository')
-  }
-  if (await runGitCommand(repositoryRoot, ['branch', '--show-current']) !== 'main') {
-    throw new Error('release branch must be main')
-  }
-  if (await runGitCommand(repositoryRoot, ['status', '--porcelain'])) {
-    throw new Error('release repository must be clean')
-  }
-  const tag = `zen-agent-v${requested}`
-  let localTagExists = false
-  try {
-    await runGitCommand(repositoryRoot, ['show-ref', '--verify', '--quiet', `refs/tags/${tag}`])
-    localTagExists = true
-  } catch (error) {
-    if (error?.code !== 1) throw error
-  }
-  if (localTagExists) throw new Error(`release tag already exists: ${tag}`)
-  if (!validateRemoteTag) return
-  try {
-    const remoteTag = await runGitCommand(
-      repositoryRoot,
-      ['ls-remote', '--exit-code', 'origin', `refs/tags/${tag}`],
-    )
-    if (remoteTag) throw new Error(`release tag already exists on origin: ${tag}`)
-  } catch (error) {
-    if (error?.code === 2) return
-    throw error
   }
 }
 
@@ -268,6 +273,16 @@ function checkPath(relative) {
   ) {
     throw new Error(`runner configuration is forbidden: ${normalized}`)
   }
+  if (
+    /^(?:deployment|kustomization)(?:\.(?:ya?ml|json|toml))?$/.test(lowerBasename)
+    || /^terraform\.tfvars(?:\.json)?$/.test(lowerBasename)
+    || /^(?:runner-config|runner\.config|codex-runner)(?:\.[a-z0-9_-]+)?$/.test(lowerBasename)
+  ) {
+    const label = lowerBasename.startsWith('runner') || lowerBasename.startsWith('codex-runner')
+      ? 'runner configuration'
+      : 'deployment configuration'
+    throw new Error(`${label} is forbidden: ${normalized}`)
+  }
   for (const [label, matches] of PATH_SEGMENT_RULES) {
     if (matches(segments)) throw new Error(`${label} is forbidden: ${normalized}`)
   }
@@ -276,6 +291,9 @@ function checkPath(relative) {
 function scanContent(relative, content) {
   if (content.includes('\uFFFD')) {
     throw new Error(`invalid UTF-8 content found in ${relative}`)
+  }
+  if (content.includes(['+', 'codex'].join(''))) {
+    throw new Error(`private build metadata found in ${relative}`)
   }
   for (const [label, pattern] of contentRules()) {
     if (pattern.test(content)) {
@@ -319,11 +337,25 @@ export async function scanRepository(repositoryRoot, { files } = {}) {
   return entries
 }
 
-async function defaultRunCommand(command, args, cwd) {
-  await execFileAsync(command, args, {
-    cwd,
-    maxBuffer: 20 * 1024 * 1024,
-  })
+export async function defaultRunCommand(command, args, cwd) {
+  try {
+    await execFileAsync(command, args, {
+      cwd,
+      maxBuffer: 20 * 1024 * 1024,
+    })
+  } catch (error) {
+    throw sanitizeProcessError(command, error)
+  }
+}
+
+function sanitizeProcessError(command, error) {
+  const code = typeof error?.code === 'number' ? error.code : undefined
+  const signal = typeof error?.signal === 'string' ? error.signal : undefined
+  const suffix = code !== undefined ? ` (exit code ${code})` : signal ? ` (${signal})` : ''
+  const sanitized = new Error(`${command} failed${suffix}`)
+  if (code !== undefined) sanitized.code = code
+  if (signal !== undefined) sanitized.signal = signal
+  return sanitized
 }
 
 export function defaultValidatorPath() {
