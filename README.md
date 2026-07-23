@@ -58,17 +58,38 @@ claude plugin install zen-agent@zen
 
 Restart Claude Code or run `/reload-plugins`.
 
-### Optional legacy migration
+## Usage
 
-If you previously installed `agent-bridge@zen`, remove it once after installing
-Zen Agent:
+Zen Agent is for bounded review, analysis, and patch-drafting tasks. Ask Codex or
+Claude Code to delegate a narrow task and include only the context needed to
+answer it.
 
-```bash
-codex plugin remove agent-bridge@zen
-claude plugin uninstall agent-bridge@zen
-```
+### Typical workflow
 
-Do not enable `agent-bridge@zen` and `zen-agent@zen` together.
+1. Zen Agent checks the existing `zen login` session with `auth_status`.
+2. It starts a remote job with `start_agent` and keeps the returned job ID.
+3. It polls `agent_status` until the job is done or requests specific context.
+4. When context is requested, the local agent reviews the reason and sends only
+   the smallest approved excerpt with `provide_context`.
+5. The local agent retrieves findings or an optional unified diff with
+   `agent_result`, reviews the result, and applies any accepted change locally.
+6. Stop unnecessary work with `cancel_agent`; use `list_agents` to inspect the
+   current user's jobs.
+
+### Available operations
+
+- `auth_status` — check the current Zen session and quota.
+- `start_agent` — start a context-only remote job.
+- `agent_status` — poll a job and inspect context requests.
+- `provide_context` — send locally reviewed text for an approved request.
+- `agent_result` — retrieve structured findings and an optional unified diff.
+- `cancel_agent` — cancel a job and release capacity.
+- `list_agents` — list the current user's jobs.
+
+The remote agent never receives automatic filesystem or Git access. Repository
+content stays local unless the local agent explicitly approves a specific,
+minimal context excerpt. Treat returned findings and patches as review input;
+inspect and test all accepted changes locally.
 
 ## Login and privacy
 
