@@ -16,40 +16,89 @@ repository access and context authorization local.
 - A current Codex or Claude Code installation
 - Network access to `https://zen.0xii.com`
 
-### Development
+### Quickstart in Codex
 
-Build and verify the public client from source:
+Run all `codex plugin` installation, update, and list commands below in a
+terminal.
 
-```bash
-cd plugins/zen-agent/server
-npm ci
-npm test
-npm run build
-npm run notices:check
-npm run test:release
-```
-
-Prepare a later stable release from the repository root with:
-
-```bash
-node plugins/zen-agent/scripts/release.mjs --version X.Y.Z
-```
-
-The release command synchronizes public metadata and runs the complete local
-test, build, validator, and security gate. See [AGENTS.md](AGENTS.md) for the
-development and release contract.
-
-### Install in Codex
+#### 1. Install the plugin
 
 ```bash
 codex plugin marketplace add 0xshawn/zen-plugins
 codex plugin add zen-agent@zen
 ```
 
-Fully quit and restart the ChatGPT/Codex desktop application, then start a new
-chat.
+Inspect the installation and version information with:
+
+```bash
+codex plugin list --marketplace zen --json
+```
+
+After installation, fully quit and reopen the ChatGPT/Codex desktop app, then
+start a new chat.
+
+#### 2. Log in
+
+In the new chat, send:
+
+```text
+Log me in to Zen Agent.
+```
+
+Codex invokes the `zen_login` plugin tool. `zen_login` is not a shell command.
+Open the secure browser link returned in chat and approve the request. Codex
+monitors the approval and confirms when authentication is complete.
+Do not paste passwords, device codes, or session tokens into chat.
+
+#### 3. Delegate a bounded task
+
+Ask Codex to delegate a narrow task and name the files it may supply as
+context. For example:
+
+```text
+Use Zen Agent to review the installation and login documentation in README.md
+and plugins/zen-agent/README.md. Supply context only from those two named files.
+Report findings by severity and include a unified diff when a change is useful.
+Do not edit any local files.
+```
+
+Codex starts the hosted job, handles specific context requests, and returns the
+findings or proposed patch for local review. Inspect and test every accepted
+change locally.
+
+#### What Zen receives
+
+- The delegated task text is sent to Zen. Do not put secrets in task text.
+- Initial context and context supplied in response to later requests are sent
+  only as selected text items.
+- The local Codex agent may supply ordinary text from inside the repository when
+  it is relevant to the task and stays within normal limits.
+- Explicit user confirmation is required before sending secrets or authentication
+  configuration, paths outside the repository, binary or other non-text
+  content, or oversized context.
+
+Zen Agent does not receive automatic filesystem or Git access.
+
+#### Plugin tools Codex uses
+
+`auth_status`, `start_agent`, `agent_status`, `provide_context`, `agent_result`,
+`cancel_agent`, and `list_agents` are plugin tools that Codex invokes. They are
+not terminal commands or chat commands users normally type.
+
+The normal workflow is:
+
+1. Codex checks the current session with `auth_status`.
+2. It starts a remote job with `start_agent` and keeps the returned job ID.
+3. It polls `agent_status` until the job is done or requests specific context.
+4. When context is requested, Codex reviews the reason and sends only the
+   smallest authorized excerpt with `provide_context`.
+5. It retrieves findings or an optional unified diff with `agent_result`.
+6. It stops unnecessary work with `cancel_agent`; `list_agents` can inspect the
+   current user's jobs.
 
 ### Update in Codex
+
+Run these commands in a terminal:
 
 ```bash
 codex plugin marketplace upgrade zen
@@ -57,8 +106,7 @@ codex plugin remove zen-agent@zen
 codex plugin add zen-agent@zen
 ```
 
-Fully quit and restart the ChatGPT/Codex desktop application, then start a new
-chat.
+Fully quit and reopen the ChatGPT/Codex desktop app, then start a new chat.
 
 If Codex still shows an older plugin version, verify the marketplace upgrade
 and reinstall completed, then fully quit the desktop process. Opening only a
@@ -83,48 +131,28 @@ claude plugin install zen-agent@zen
 
 Restart Claude Code or run `/reload-plugins`.
 
-## Usage
+### Development
 
-Zen Agent is for bounded review, analysis, and patch-drafting tasks. Ask Codex or
-Claude Code to delegate a narrow task and include only the context needed to
-answer it.
+Build and verify the public client from source:
 
-### Typical workflow
+```bash
+cd plugins/zen-agent/server
+npm ci
+npm test
+npm run build
+npm run notices:check
+npm run test:release
+```
 
-1. Zen Agent checks the existing `zen login` session with `auth_status`.
-2. It starts a remote job with `start_agent` and keeps the returned job ID.
-3. It polls `agent_status` until the job is done or requests specific context.
-4. When context is requested, the local agent reviews the reason and sends only
-   the smallest approved excerpt with `provide_context`.
-5. The local agent retrieves findings or an optional unified diff with
-   `agent_result`, reviews the result, and applies any accepted change locally.
-6. Stop unnecessary work with `cancel_agent`; use `list_agents` to inspect the
-   current user's jobs.
+Prepare a later stable release from the repository root with:
 
-### Available operations
+```bash
+node plugins/zen-agent/scripts/release.mjs --version X.Y.Z
+```
 
-- `auth_status` — check the current Zen session and quota.
-- `start_agent` — start a context-only remote job.
-- `agent_status` — poll a job and inspect context requests.
-- `provide_context` — send locally reviewed text for an approved request.
-- `agent_result` — retrieve structured findings and an optional unified diff.
-- `cancel_agent` — cancel a job and release capacity.
-- `list_agents` — list the current user's jobs.
-
-The remote agent never receives automatic filesystem or Git access. Repository
-content stays local unless the local agent explicitly approves a specific,
-minimal context excerpt. Treat returned findings and patches as review input;
-inspect and test all accepted changes locally.
-
-## Login and privacy
-
-Ask the agent to run `zen login`. Zen Agent returns a secure browser link in the
-chat. Copy the link into a browser and approve login there; the agent monitors
-the request and completes login automatically. Do not paste passwords, device
-codes, or session tokens into chat.
-
-Zen Agent sends no repository content unless the local agent explicitly
-approves context for a specific remote task.
+The release command synchronizes public metadata and runs the complete local
+test, build, validator, and security gate. See [AGENTS.md](AGENTS.md) for the
+development and release contract.
 
 ## Support and security
 
