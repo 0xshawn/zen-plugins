@@ -93,8 +93,8 @@ The normal workflow is:
    requests specific context or reaches a terminal state.
 4. When context is requested, Codex reviews the reason and sends only the
    smallest authorized excerpt with `provide_context`.
-5. When the wait completes with a terminal state, its response already includes
-   the terminal result, so normal operation does not require a separate
+5. When the wait completes with state `done`, its response already includes the
+   terminal result, so normal operation does not require a separate
    `agent_result` call.
 6. It stops unnecessary work with `cancel_agent`; `list_agents` can inspect the
    current user's jobs. Keep `agent_status` and `agent_result` available as
