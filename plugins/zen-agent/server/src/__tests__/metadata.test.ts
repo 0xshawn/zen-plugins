@@ -84,8 +84,12 @@ describe('Zen Agent metadata', () => {
       /polls `agent_status` until the job is done.*retrieves findings.*`agent_result`/is,
     );
     expect(pluginReadme).toMatch(/job that reaches state `done` includes its terminal result/i);
-    expect(pluginReadme).toMatch(/defaults to delegating the\s+whole workflow to one Codex subagent/i);
-    expect(pluginReadme).toMatch(/falls back to the direct `agent_wait` workflow/is);
+    expect(pluginReadme).toMatch(/defaults to delegating the whole\s+workflow to one host-native subagent/i);
+    expect(pluginReadme).toMatch(/Codex subagent in Codex or a Claude Code\s+subagent in Claude Code/i);
+    expect(pluginReadme).toMatch(/falls\s+back to the direct `agent_wait` workflow/i);
     expect(pluginReadme).not.toMatch(/completed job includes its terminal result/i);
+    expect(readme).toMatch(/Claude Code loads the same Zen Agent skill and MCP server as Codex/i);
+    expect(readme).toMatch(/creates one Claude Code subagent to run the\s+Zen Agent workflow/i);
+    expect(readme).toMatch(/Claude Code falls back to the direct\s+`agent_wait` workflow/i);
   });
 });

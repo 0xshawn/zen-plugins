@@ -133,6 +133,12 @@ claude plugin install zen-agent@zen
 
 Restart Claude Code or run `/reload-plugins`.
 
+Claude Code loads the same Zen Agent skill and MCP server as Codex. When
+subagent support is available, it creates one Claude Code subagent to run the
+Zen Agent workflow and return a concise parent summary. If the subagent cannot
+inherit the Zen Agent MCP tools, Claude Code falls back to the direct
+`agent_wait` workflow.
+
 ### Update in Claude Code
 
 ```bash
