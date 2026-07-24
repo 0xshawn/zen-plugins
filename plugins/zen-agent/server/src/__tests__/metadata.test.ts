@@ -78,10 +78,14 @@ describe('Zen Agent metadata', () => {
     expect(readme).toMatch(/wait completes with state `done`, its response already includes/i);
     expect(readme).not.toMatch(/wait completes with a terminal state, its response already includes/i);
     expect(readme).toMatch(/should not run shell wrappers or ad-hoc polling scripts/i);
+    expect(readme).toMatch(/multi-agent support is available.*creates one subagent/is);
+    expect(readme).toMatch(/subagents or inherited MCP tools are unavailable.*directly/is);
     expect(readme).not.toMatch(
       /polls `agent_status` until the job is done.*retrieves findings.*`agent_result`/is,
     );
     expect(pluginReadme).toMatch(/job that reaches state `done` includes its terminal result/i);
+    expect(pluginReadme).toMatch(/defaults to delegating the\s+whole workflow to one Codex subagent/i);
+    expect(pluginReadme).toMatch(/falls back to the direct `agent_wait` workflow/is);
     expect(pluginReadme).not.toMatch(/completed job includes its terminal result/i);
   });
 });

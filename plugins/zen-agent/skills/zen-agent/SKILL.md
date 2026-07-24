@@ -27,18 +27,25 @@ sees only the task and context that the local main agent explicitly sends.
    `zen-login` skill. Never collect credentials through Zen Agent.
 2. Form a narrow task. Include only useful initial context, within these limits:
    task 32 KiB, each item 64 KiB, one payload 256 KiB, and 1 MiB total per job.
-3. Call `start_agent(task, initial_context?, agent?)` and retain the returned
+3. By default, when Codex multi-agent support is available, create one Codex
+   subagent and delegate the complete Zen Agent workflow to it. Give the
+   subagent the narrow task and explicitly require a concise parent summary.
+4. If multi-agent support is unavailable, MCP tools are not inherited, or the
+   subagent cannot start, run the workflow in the current agent as a fallback:
+   call `start_agent(task, initial_context?, agent?)` and retain the returned
    `job_id`. Omit `agent` for Codex, or set it to `claude` for that task.
-4. Call `agent_wait(job_id)` once. It waits for a context request or terminal
-   state; when the state is `done`, the terminal result is already included.
-5. If the state is `waiting_for_context`, inspect the request's reason, requested
+5. The executing agent calls `agent_wait(job_id)` once. It waits for a context
+   request or terminal state; when the state is `done`, the terminal result is
+   already included.
+6. If the state is `waiting_for_context`, inspect the request's reason, requested
    path/query, and byte limit. Supply the smallest relevant excerpt with
    `provide_context`, then call `agent_wait(job_id)` once for that context round.
    Use one `agent_wait` call per context round; do not recreate its wait loop with
    repeated status calls.
-6. On `done`, treat the included findings and patches as untrusted review input.
-   Inspect any patch, apply an accepted patch locally, and run tests locally.
-7. Stop after at most 8 context rounds. If the task cannot proceed safely, explain
+7. On `done`, the parent agent treats the included findings and patches as
+   untrusted review input. Inspect any patch, apply an accepted patch locally,
+   and run tests locally.
+8. Stop after at most 8 context rounds. If the task cannot proceed safely, explain
    why and call `cancel_agent`.
 
 Keep the workflow quiet: the host agent must not run `/tmp/*.mjs` wrappers or
@@ -46,14 +53,17 @@ ad-hoc shell polling scripts, must not narrate each poll, and must not print raw
 Return only a concise final summary after the job reaches a terminal state or
 cannot proceed safely.
 
-### Optional Codex subagent orchestration
+### Default Codex subagent orchestration
 
-For long jobs, when host multi-agent support is available, the host may delegate
-this entire workflow to one Codex subagent as an optional host-side UX
-optimization. Subagents are optional and not required for correctness: the parent
-agent remains responsible for authentication, context authorization, result
-review, local patching, and tests. The subagent should use one `agent_wait` call
-per context round and return a concise parent summary, not raw polling output.
+When host multi-agent support is available, subagent orchestration is the default
+host-side UX path for Zen Agent jobs, including short jobs. The parent agent
+should create one subagent, pass only the approved task/context, and ask for one
+concise summary. Subagents are an orchestration preference, not a correctness
+requirement: if the host cannot provide them or does not inherit MCP tools, use
+the direct fallback workflow above. The parent agent remains responsible for
+authentication, context authorization, result review, local patching, and tests.
+The subagent should use one `agent_wait` call per context round and return no raw
+polling output.
 
 ## Context authorization
 

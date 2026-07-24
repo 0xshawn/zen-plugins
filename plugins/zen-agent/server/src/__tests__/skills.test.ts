@@ -59,7 +59,10 @@ describe('Zen Agent skills', () => {
     expect(content).toMatch(/must not run [`']?\/tmp\/\*\.mjs[`']? wrappers?/i);
     expect(content).toMatch(/must not narrate each poll/i);
     expect(content).toMatch(/must not print raw status JSON/i);
-    expect(content).toMatch(/subagents? (?:are|is) optional/i);
+    expect(content).toMatch(/subagent.*default|default.*subagent/is);
+    expect(content).toMatch(/multi-agent support/i);
+    expect(content).toMatch(/fallback.*workflow|workflow.*fallback/is);
+    expect(content).toMatch(/subagents? (?:are|is) (?:an orchestration preference|optional)/i);
     expect(content).toMatch(/concise parent summary/i);
   });
 });
