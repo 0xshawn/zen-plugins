@@ -81,20 +81,27 @@ Zen Agent does not receive automatic filesystem or Git access.
 
 #### Plugin tools Codex uses
 
-`auth_status`, `start_agent`, `agent_status`, `provide_context`, `agent_result`,
-`cancel_agent`, and `list_agents` are plugin tools that Codex invokes. They are
-not terminal commands or chat commands users normally type.
+`auth_status`, `start_agent`, `agent_wait`, `agent_status`, `provide_context`,
+`agent_result`, `cancel_agent`, and `list_agents` are plugin tools that Codex
+invokes, not terminal commands or chat commands users normally type.
 
 The normal workflow is:
 
 1. Codex checks the current session with `auth_status`.
 2. It starts a remote job with `start_agent` and keeps the returned job ID.
-3. It polls `agent_status` until the job is done or requests specific context.
+3. It calls `agent_wait` once per context round. The wait pauses until the job
+   requests specific context or reaches a terminal state.
 4. When context is requested, Codex reviews the reason and sends only the
    smallest authorized excerpt with `provide_context`.
-5. It retrieves findings or an optional unified diff with `agent_result`.
+5. When the wait completes with a terminal state, its response already includes
+   the terminal result, so normal operation does not require a separate
+   `agent_result` call.
 6. It stops unnecessary work with `cancel_agent`; `list_agents` can inspect the
-   current user's jobs.
+   current user's jobs. Keep `agent_status` and `agent_result` available as
+   explicit/debug tools when a direct status or result fetch is needed.
+
+Hosts should not run shell wrappers or ad-hoc polling scripts, narrate each poll,
+or print raw status JSON. Return a concise final summary instead.
 
 ### Update in Codex
 

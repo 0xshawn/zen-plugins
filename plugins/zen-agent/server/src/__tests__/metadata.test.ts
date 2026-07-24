@@ -69,4 +69,15 @@ describe('Zen Agent metadata', () => {
       expect(workflow).toContain(command);
     }
   });
+
+  it('documents the quiet agent_wait quickstart workflow', () => {
+    const readme = readText('../../README.md');
+    expect(readme).toContain('`agent_wait`');
+    expect(readme).toMatch(/calls `agent_wait` once per context round/i);
+    expect(readme).toMatch(/wait completes with a terminal state, its response already includes/i);
+    expect(readme).toMatch(/should not run shell wrappers or ad-hoc polling scripts/i);
+    expect(readme).not.toMatch(
+      /polls `agent_status` until the job is done.*retrieves findings.*`agent_result`/is,
+    );
+  });
 });

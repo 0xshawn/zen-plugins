@@ -14104,8 +14104,8 @@ var ZenAgentClient = class {
     };
     return this.request("/api/agent/jobs", { method: "POST", body: JSON.stringify(payload) });
   }
-  agentStatus(jobId) {
-    return this.request(`/api/agent/jobs/${encodeURIComponent(jobId)}`);
+  agentStatus(jobId, signal) {
+    return this.request(`/api/agent/jobs/${encodeURIComponent(jobId)}`, { signal });
   }
   provideContext(jobId, body) {
     return this.request(`/api/agent/jobs/${encodeURIComponent(jobId)}/context`, {
@@ -14113,8 +14113,8 @@ var ZenAgentClient = class {
       body: JSON.stringify(body)
     });
   }
-  agentResult(jobId) {
-    return this.request(`/api/agent/jobs/${encodeURIComponent(jobId)}/result`);
+  agentResult(jobId, signal) {
+    return this.request(`/api/agent/jobs/${encodeURIComponent(jobId)}/result`, { signal });
   }
   cancelAgent(jobId) {
     return this.request(`/api/agent/jobs/${encodeURIComponent(jobId)}`, { method: "DELETE" });
@@ -14423,6 +14423,11 @@ var SERVER_NAME = "zen-agent";
 var TASK_MAX_BYTES = 32 * 1024;
 var CONTEXT_ITEM_MAX_BYTES = 64 * 1024;
 var CONTEXT_PAYLOAD_MAX_BYTES = 256 * 1024;
+var AGENT_WAIT_POLL_INTERVAL_MS = 1e3;
+var AGENT_WAIT_DEADLINE_MS = 5 * 60 * 1e3;
+var AGENT_WAIT_TIMEOUT_MESSAGE = "agent_wait timed out after five minutes; the job remains active. Call agent_wait again, or use agent_status or cancel_agent.";
+var UNSERIALIZABLE_TOOL_RESPONSE = '{"error":"Unable to serialize tool response."}';
+var TERMINAL_JOB_STATES = /* @__PURE__ */ new Set(["done", "error", "cancelled", "expired"]);
 var zenLoginCoordinator = new ZenLoginCoordinator();
 function byteLength(value) {
   return Buffer.byteLength(value, "utf8");
@@ -14470,6 +14475,66 @@ function validatePayload(body) {
 async function client() {
   const session = await loadZenSession();
   return { api: new ZenAgentClient(session.baseUrl, session.token), email: session.email };
+}
+function requestAbortedError(signal) {
+  return signal.reason instanceof Error ? signal.reason : new Error("Request aborted");
+}
+function createAgentWaitSignal(requestSignal) {
+  const controller = new AbortController();
+  const onRequestAbort = () => controller.abort(requestSignal?.reason);
+  if (requestSignal?.aborted) onRequestAbort();
+  else requestSignal?.addEventListener("abort", onRequestAbort, { once: true });
+  const deadlineTimer = setTimeout(() => {
+    controller.abort(new Error(AGENT_WAIT_TIMEOUT_MESSAGE));
+  }, AGENT_WAIT_DEADLINE_MS);
+  return {
+    signal: controller.signal,
+    dispose: () => {
+      clearTimeout(deadlineTimer);
+      requestSignal?.removeEventListener("abort", onRequestAbort);
+    }
+  };
+}
+function raceWithAbort(action, signal) {
+  if (signal.aborted) return Promise.reject(requestAbortedError(signal));
+  return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      signal.removeEventListener("abort", onAbort);
+      reject(requestAbortedError(signal));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    try {
+      action().then(
+        (value) => {
+          signal.removeEventListener("abort", onAbort);
+          resolve(value);
+        },
+        (error2) => {
+          signal.removeEventListener("abort", onAbort);
+          reject(error2);
+        }
+      );
+    } catch (error2) {
+      signal.removeEventListener("abort", onAbort);
+      reject(error2);
+    }
+  });
+}
+function delay2(ms, signal) {
+  if (signal?.aborted) return Promise.reject(requestAbortedError(signal));
+  return new Promise((resolve, reject) => {
+    let timeout;
+    const onAbort = () => {
+      if (timeout !== void 0) clearTimeout(timeout);
+      signal?.removeEventListener("abort", onAbort);
+      reject(requestAbortedError(signal));
+    };
+    timeout = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
 }
 async function handleZenLogin(args = {}, requestSignal, coordinator = zenLoginCoordinator) {
   assertAllowedKeys(args, ["login_id"]);
@@ -14520,6 +14585,26 @@ async function handleAgentResult(args) {
   const jobId = requiredString(args.job_id, "job_id");
   const { api } = await client();
   return api.agentResult(jobId);
+}
+async function handleAgentWait(args, requestSignal) {
+  assertAllowedKeys(args, ["job_id"]);
+  const jobId = requiredString(args.job_id, "job_id");
+  const wait = createAgentWaitSignal(requestSignal);
+  try {
+    const { api } = await raceWithAbort(client, wait.signal);
+    let status = await raceWithAbort(() => api.agentStatus(jobId, wait.signal), wait.signal);
+    while (status.state !== "waiting_for_context" && !TERMINAL_JOB_STATES.has(status.state)) {
+      await delay2(AGENT_WAIT_POLL_INTERVAL_MS, wait.signal);
+      status = await raceWithAbort(() => api.agentStatus(jobId, wait.signal), wait.signal);
+    }
+    if (status.state === "done") {
+      const result = await raceWithAbort(() => api.agentResult(jobId, wait.signal), wait.signal);
+      return { ...status, result };
+    }
+    return status;
+  } finally {
+    wait.dispose();
+  }
 }
 async function handleCancelAgent(args) {
   assertAllowedKeys(args, ["job_id"]);
@@ -14610,6 +14695,16 @@ var toolDefinitions = [
     }
   },
   {
+    name: "agent_wait",
+    description: "Wait for a Zen agent job to finish or request more context.",
+    inputSchema: {
+      type: "object",
+      properties: { job_id: { type: "string" } },
+      required: ["job_id"],
+      additionalProperties: false
+    }
+  },
+  {
     name: "cancel_agent",
     description: "Cancel a Zen agent job and release its capacity.",
     inputSchema: {
@@ -14625,6 +14720,26 @@ var toolDefinitions = [
     inputSchema: { type: "object", properties: {}, additionalProperties: false }
   }
 ];
+function serializeToolResponse(value) {
+  const seen = /* @__PURE__ */ new WeakSet();
+  try {
+    const serialized = JSON.stringify(value, (_key, current) => {
+      if (typeof current === "bigint") return current.toString();
+      if (typeof current === "object" && current !== null) {
+        if (seen.has(current)) return "[Circular]";
+        seen.add(current);
+      }
+      return current;
+    });
+    return serialized ?? JSON.stringify(String(value));
+  } catch {
+    try {
+      return JSON.stringify(String(value));
+    } catch {
+      return UNSERIALIZABLE_TOOL_RESPONSE;
+    }
+  }
+}
 async function main() {
   const packageMetadata = JSON.parse(
     readFileSync(new URL("../package.json", import.meta.url), "utf8")
@@ -14657,6 +14772,9 @@ async function main() {
         case "agent_result":
           result = await handleAgentResult(args);
           break;
+        case "agent_wait":
+          result = await handleAgentWait(args, extra.signal);
+          break;
         case "cancel_agent":
           result = await handleCancelAgent(args);
           break;
@@ -14666,10 +14784,10 @@ async function main() {
         default:
           result = { error: `Unknown tool: ${request.params.name}` };
       }
-      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+      return { content: [{ type: "text", text: serializeToolResponse(result) }] };
     } catch (error2) {
       const message = error2 instanceof Error ? error2.message : String(error2);
-      return { content: [{ type: "text", text: JSON.stringify({ error: message }, null, 2) }], isError: true };
+      return { content: [{ type: "text", text: serializeToolResponse({ error: message }) }], isError: true };
     }
   });
   await server.connect(new StdioServerTransport());
@@ -14683,9 +14801,12 @@ if (invokedPath === fileURLToPath(import.meta.url)) {
   });
 }
 export {
+  AGENT_WAIT_DEADLINE_MS,
+  AGENT_WAIT_POLL_INTERVAL_MS,
   SERVER_NAME,
   handleAgentResult,
   handleAgentStatus,
+  handleAgentWait,
   handleAuthStatus,
   handleCancelAgent,
   handleListAgents,
@@ -14693,5 +14814,6 @@ export {
   handleStartAgent,
   handleZenLogin,
   main,
+  serializeToolResponse,
   toolDefinitions
 };
