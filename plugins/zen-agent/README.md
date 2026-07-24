@@ -41,6 +41,22 @@ with mode `0600`.
 Customer repository context remains local unless the local agent explicitly
 approves context for a specific Zen agent task.
 
+## Tool workflow
+
+`agent_wait` is the quiet default workflow: after `start_agent`, call it once
+per context round. If the job requests context, review the request locally,
+send the smallest authorized excerpt with `provide_context`, and call
+`agent_wait` again. A completed job includes its terminal result, so normal
+operation does not require a separate polling loop or `agent_result` call.
+Hosts should not run shell wrappers or narrate each poll; return a concise final
+summary instead.
+
+When Codex multi-agent support is available, delegating the whole workflow to
+one Codex subagent is an optional host-side UX optimization, not a correctness
+requirement. The parent agent still owns context authorization, result review,
+local changes, and verification, and the subagent should return a concise
+summary to its parent.
+
 ## Requirements
 
 - Node.js 20 or newer

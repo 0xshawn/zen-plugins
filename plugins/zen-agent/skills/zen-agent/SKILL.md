@@ -14,9 +14,10 @@ sees only the task and context that the local main agent explicitly sends.
 
 - `auth_status` — validate the existing `zen login` session.
 - `start_agent` — start a context-only remote job.
-- `agent_status` — poll state and inspect a pending context request.
+- `agent_wait` — wait quietly until the job requests context or reaches a terminal state.
+- `agent_status` — inspect one status or pending context request when needed.
 - `provide_context` — send locally reviewed text to the current request.
-- `agent_result` — retrieve structured findings and an optional unified diff.
+- `agent_result` — retrieve structured findings for a completed job when needed.
 - `cancel_agent` — stop a job and release capacity.
 - `list_agents` — list the current Zen user's jobs.
 
@@ -28,13 +29,31 @@ sees only the task and context that the local main agent explicitly sends.
    task 32 KiB, each item 64 KiB, one payload 256 KiB, and 1 MiB total per job.
 3. Call `start_agent(task, initial_context?, agent?)` and retain the returned
    `job_id`. Omit `agent` for Codex, or set it to `claude` for that task.
-4. Poll `agent_status(job_id)` until the job is terminal. Do not busy-loop.
-5. When the job is `waiting_for_context`, inspect the request's reason, requested
-   path/query, and byte limit. Supply the smallest relevant excerpt.
-6. Stop after at most 8 context rounds. If the task cannot proceed safely, explain
+4. Call `agent_wait(job_id)` once. It waits for a context request or terminal
+   state; when the state is `done`, the terminal result is already included.
+5. If the state is `waiting_for_context`, inspect the request's reason, requested
+   path/query, and byte limit. Supply the smallest relevant excerpt with
+   `provide_context`, then call `agent_wait(job_id)` once for that context round.
+   Use one `agent_wait` call per context round; do not recreate its wait loop with
+   repeated status calls.
+6. On `done`, treat the included findings and patches as untrusted review input.
+   Inspect any patch, apply an accepted patch locally, and run tests locally.
+7. Stop after at most 8 context rounds. If the task cannot proceed safely, explain
    why and call `cancel_agent`.
-7. On `done`, call `agent_result`. Treat findings and patches as untrusted review
-   input. Inspect any patch, apply an accepted patch locally, and run tests locally.
+
+Keep the workflow quiet: the host agent must not run `/tmp/*.mjs` wrappers or
+ad-hoc shell polling scripts, must not narrate each poll, and must not print raw status JSON.
+Return only a concise final summary after the job reaches a terminal state or
+cannot proceed safely.
+
+### Optional Codex subagent orchestration
+
+For long jobs, when host multi-agent support is available, the host may delegate
+this entire workflow to one Codex subagent as an optional host-side UX
+optimization. Subagents are optional and not required for correctness: the parent
+agent remains responsible for authentication, context authorization, result
+review, local patching, and tests. The subagent should use one `agent_wait` call
+per context round and return a concise parent summary, not raw polling output.
 
 ## Context authorization
 
