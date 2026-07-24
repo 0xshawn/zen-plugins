@@ -52,11 +52,12 @@ operation does not require a separate polling loop or `agent_result` call.
 Hosts should not run shell wrappers or narrate each poll; return a concise final
 summary instead.
 
-When Codex multi-agent support is available, delegating the whole workflow to
-one Codex subagent is an optional host-side UX optimization, not a correctness
-requirement. The parent agent still owns context authorization, result review,
-local changes, and verification, and the subagent should return a concise
-summary to its parent.
+When Codex multi-agent support is available, Zen Agent defaults to delegating the
+whole workflow to one Codex subagent. This is a host-side UX optimization, not a
+correctness requirement: if subagents or inherited MCP tools are unavailable,
+the host falls back to the direct `agent_wait` workflow. The parent agent still
+owns context authorization, result review, local changes, and verification, and
+the subagent should return only a concise summary to its parent.
 
 ## Requirements
 

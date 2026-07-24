@@ -88,15 +88,20 @@ invokes, not terminal commands or chat commands users normally type.
 The normal workflow is:
 
 1. Codex checks the current session with `auth_status`.
-2. It starts a remote job with `start_agent` and keeps the returned job ID.
-3. It calls `agent_wait` once per context round. The wait pauses until the job
+2. When multi-agent support is available, Codex creates one subagent to own the
+   Zen Agent workflow and asks it to return one concise parent summary. If
+   subagents or inherited MCP tools are unavailable, it runs the workflow
+   directly.
+3. The executing agent starts a remote job with `start_agent` and keeps the
+   returned job ID.
+4. It calls `agent_wait` once per context round. The wait pauses until the job
    requests specific context or reaches a terminal state.
-4. When context is requested, Codex reviews the reason and sends only the
+5. When context is requested, Codex reviews the reason and sends only the
    smallest authorized excerpt with `provide_context`.
-5. When the wait completes with state `done`, its response already includes the
+6. When the wait completes with state `done`, its response already includes the
    terminal result, so normal operation does not require a separate
    `agent_result` call.
-6. It stops unnecessary work with `cancel_agent`; `list_agents` can inspect the
+7. It stops unnecessary work with `cancel_agent`; `list_agents` can inspect the
    current user's jobs. Keep `agent_status` and `agent_result` available as
    explicit/debug tools when a direct status or result fetch is needed.
 
