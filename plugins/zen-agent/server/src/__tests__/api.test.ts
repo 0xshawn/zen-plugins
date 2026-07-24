@@ -38,12 +38,13 @@ describe('ZenAgentClient', () => {
       });
     });
     const client = new ZenAgentClient('http://zen/', 'session-token', fetcher as typeof fetch);
+    const signal = new AbortController().signal;
 
     await client.authStatus();
     await client.startAgent({ task: 'review', initial_context: [], agent: 'codex' });
-    const status = await client.agentStatus('job-1');
+    const status = await client.agentStatus('job-1', signal);
     await client.provideContext('job-1', { request_id: 'ctx-1', items: [] });
-    await client.agentResult('job-1');
+    await client.agentResult('job-1', signal);
     await client.cancelAgent('job-1');
     const agents = await client.listAgents();
 
@@ -64,6 +65,8 @@ describe('ZenAgentClient', () => {
       task: 'review', initial_context: [], agent: 'codex',
     });
     expect(JSON.parse(String(fetcher.mock.calls[3][1]?.body))).toEqual({ request_id: 'ctx-1', items: [] });
+    expect(fetcher.mock.calls[2][1]?.signal).toBe(signal);
+    expect(fetcher.mock.calls[4][1]?.signal).toBe(signal);
     expect(status).toEqual({ job_id: 'job-1', agent: 'claude', state: 'running' });
     expect(agents).toEqual([{ job_id: 'job-1', agent: 'codex', state: 'running' }]);
   });
