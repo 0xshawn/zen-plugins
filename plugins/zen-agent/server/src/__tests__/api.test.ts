@@ -26,19 +26,26 @@ describe('ZenAgentClient', () => {
       if (path.endsWith('/result')) {
         return jsonResponse(200, { summary: 'done', findings: [], tests: [], assumptions: [], remaining_questions: [] });
       }
-      if (path === '/api/agent/jobs' && init?.method !== 'POST') return jsonResponse(200, []);
+      if (path === '/api/agent/jobs' && init?.method !== 'POST') {
+        return jsonResponse(200, [{ job_id: 'job-1', agent: 'codex', state: 'running' }]);
+      }
       if (path === '/api/user/usage') return jsonResponse(200, { used_tokens: 1, quota_tokens: 2 });
-      return jsonResponse(200, { job_id: 'job-1', state: init?.method === 'DELETE' ? 'cancelled' : 'running' });
+      if (path === '/api/agent/jobs/job-1' && init?.method !== 'DELETE') {
+        return jsonResponse(200, { job_id: 'job-1', agent: 'claude', state: 'running' });
+      }
+      return jsonResponse(200, {
+        job_id: 'job-1', agent: 'codex', state: init?.method === 'DELETE' ? 'cancelled' : 'running',
+      });
     });
     const client = new ZenAgentClient('http://zen/', 'session-token', fetcher as typeof fetch);
 
     await client.authStatus();
-    await client.startAgent({ task: 'review', initial_context: [] });
-    await client.agentStatus('job-1');
+    await client.startAgent({ task: 'review', initial_context: [], agent: 'codex' });
+    const status = await client.agentStatus('job-1');
     await client.provideContext('job-1', { request_id: 'ctx-1', items: [] });
     await client.agentResult('job-1');
     await client.cancelAgent('job-1');
-    await client.listAgents();
+    const agents = await client.listAgents();
 
     expect(fetcher).toHaveBeenCalledTimes(7);
     for (const [, init] of fetcher.mock.calls) {
@@ -53,8 +60,26 @@ describe('ZenAgentClient', () => {
       ['/api/agent/jobs/job-1', 'DELETE'],
       ['/api/agent/jobs', 'GET'],
     ]);
-    expect(JSON.parse(String(fetcher.mock.calls[1][1]?.body))).toEqual({ task: 'review', initial_context: [] });
+    expect(JSON.parse(String(fetcher.mock.calls[1][1]?.body))).toEqual({
+      task: 'review', initial_context: [], agent: 'codex',
+    });
     expect(JSON.parse(String(fetcher.mock.calls[3][1]?.body))).toEqual({ request_id: 'ctx-1', items: [] });
+    expect(status).toEqual({ job_id: 'job-1', agent: 'claude', state: 'running' });
+    expect(agents).toEqual([{ job_id: 'job-1', agent: 'codex', state: 'running' }]);
+  });
+
+  it('serializes an explicit Claude selection', async () => {
+    const fetcher = vi.fn(async (_input: string | URL | Request, _init?: RequestInit) => jsonResponse(201, {
+      job_id: 'job-2', agent: 'claude', state: 'queued',
+    }));
+    const client = new ZenAgentClient('http://zen', 'session', fetcher as typeof fetch);
+
+    await expect(client.startAgent({ task: 'review', initial_context: [], agent: 'claude' })).resolves.toEqual({
+      job_id: 'job-2', agent: 'claude', state: 'queued',
+    });
+    expect(JSON.parse(String(fetcher.mock.calls[0][1]?.body))).toEqual({
+      task: 'review', initial_context: [], agent: 'claude',
+    });
   });
 
   it.each([

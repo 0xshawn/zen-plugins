@@ -8,6 +8,8 @@ export type JobState =
   | 'cancelled'
   | 'expired';
 
+export type AgentKind = 'codex' | 'claude';
+
 export const CONTEXT_SOURCES = [
   'file',
   'git_diff',
@@ -47,6 +49,7 @@ export interface Usage {
 
 export interface JobStatus {
   job_id: string;
+  agent?: AgentKind;
   state: JobState;
   elapsed_ms?: number;
   last_action?: string;
@@ -72,11 +75,13 @@ export interface AgentResult {
 export interface CreateJobRequest {
   task: string;
   initial_context: ContextItem[];
+  agent: AgentKind;
 }
 
 export interface CreateJobResponse {
   job_id: string;
   state: JobState;
+  agent?: AgentKind;
 }
 
 export interface ProvideContextRequest {

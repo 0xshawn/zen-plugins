@@ -168,7 +168,12 @@ export class ZenAgentClient {
   }
 
   startAgent(body: CreateJobRequest): Promise<CreateJobResponse> {
-    return this.request('/api/agent/jobs', { method: 'POST', body: JSON.stringify(body) });
+    const payload: CreateJobRequest = {
+      task: body.task,
+      initial_context: body.initial_context,
+      agent: body.agent,
+    };
+    return this.request('/api/agent/jobs', { method: 'POST', body: JSON.stringify(payload) });
   }
 
   agentStatus(jobId: string): Promise<JobStatus> {

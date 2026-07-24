@@ -7,7 +7,12 @@ import path from 'node:path';
 
 import { ZenAgentClient } from './api.js';
 import { loadZenSession } from './config.js';
-import { CONTEXT_SOURCES, type ContextItem } from './contracts.js';
+import {
+  CONTEXT_SOURCES,
+  type AgentKind,
+  type ContextItem,
+  type CreateJobRequest,
+} from './contracts.js';
 import { LOGIN_ID_SOURCE, ZenLoginCoordinator } from './login.js';
 
 export const SERVER_NAME = 'zen-agent';
@@ -23,6 +28,11 @@ function byteLength(value: string): number {
 
 function requiredString(value: unknown, name: string): string {
   if (typeof value !== 'string' || value.length === 0) throw new Error(`${name} must be a non-empty string`);
+  return value;
+}
+
+function requiredAgentKind(value: unknown): AgentKind {
+  if (value !== 'codex' && value !== 'claude') throw new Error('agent must be codex or claude');
   return value;
 }
 
@@ -85,14 +95,20 @@ export async function handleAuthStatus(args: Record<string, unknown> = {}) {
 }
 
 export async function handleStartAgent(args: Record<string, unknown>) {
-  assertAllowedKeys(args, ['task', 'initial_context']);
+  assertAllowedKeys(args, ['task', 'initial_context', 'agent']);
   const task = requiredString(args.task, 'task');
   if (byteLength(task) > TASK_MAX_BYTES) throw new Error('task exceeds 32 KiB');
   const initialContext = validateContextItems(args.initial_context);
-  const body = { task, initial_context: initialContext };
+  const agent = args.agent === undefined ? 'codex' : requiredAgentKind(args.agent);
+  const body: CreateJobRequest = { task, initial_context: initialContext, agent };
   validatePayload(body);
   const { api } = await client();
-  return api.startAgent(body);
+  const created = await api.startAgent(body);
+  if (agent === 'claude' && created.agent !== 'claude') {
+    await api.cancelAgent(created.job_id).catch(() => undefined);
+    throw new Error('Zen server does not support Claude jobs yet.');
+  }
+  return { ...created, agent: created.agent ?? 'codex' };
 }
 
 export async function handleAgentStatus(args: Record<string, unknown>) {
@@ -166,12 +182,13 @@ export const toolDefinitions = [
   },
   {
     name: 'start_agent',
-    description: 'Start a Zen-hosted Codex job with only explicitly supplied context.',
+    description: 'Start a Zen-hosted agent job with only explicitly supplied context.',
     inputSchema: {
       type: 'object',
       properties: {
         task: { type: 'string', description: 'Agent task, maximum 32 KiB.' },
         initial_context: { type: 'array', items: contextItemSchema },
+        agent: { type: 'string', enum: ['codex', 'claude'] },
       },
       required: ['task'],
       additionalProperties: false,

@@ -5,9 +5,10 @@ description: Use when delegating review, analysis, or patch drafting through Zen
 
 # Zen Agent
 
-Delegate a bounded task to Zen's hosted Codex identity. Zen Agent never uploads,
-clones, mounts, or synchronizes the local repository. The remote agent starts in an
-empty workspace and sees only the task and context that the local main agent explicitly sends.
+Delegate a bounded task to a Zen-hosted agent. Codex is the default, and Claude can
+be selected for an individual task. Zen Agent never uploads, clones, mounts, or
+synchronizes the local repository. The remote agent starts in an empty workspace and
+sees only the task and context that the local main agent explicitly sends.
 
 ## Tool surface
 
@@ -25,7 +26,8 @@ empty workspace and sees only the task and context that the local main agent exp
    `zen-login` skill. Never collect credentials through Zen Agent.
 2. Form a narrow task. Include only useful initial context, within these limits:
    task 32 KiB, each item 64 KiB, one payload 256 KiB, and 1 MiB total per job.
-3. Call `start_agent(task, initial_context?)` and retain the returned `job_id`.
+3. Call `start_agent(task, initial_context?, agent?)` and retain the returned
+   `job_id`. Omit `agent` for Codex, or set it to `claude` for that task.
 4. Poll `agent_status(job_id)` until the job is terminal. Do not busy-loop.
 5. When the job is `waiting_for_context`, inspect the request's reason, requested
    path/query, and byte limit. Supply the smallest relevant excerpt.
