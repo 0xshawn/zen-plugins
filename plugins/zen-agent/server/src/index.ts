@@ -23,6 +23,8 @@ const CONTEXT_ITEM_MAX_BYTES = 64 * 1024;
 const CONTEXT_PAYLOAD_MAX_BYTES = 256 * 1024;
 export const AGENT_WAIT_POLL_INTERVAL_MS = 1_000;
 export const AGENT_WAIT_DEADLINE_MS = 5 * 60 * 1_000;
+const AGENT_WAIT_TIMEOUT_MESSAGE = 'agent_wait timed out after five minutes; the job remains active. Call agent_wait again, or use agent_status or cancel_agent.';
+const UNSERIALIZABLE_TOOL_RESPONSE = '{"error":"Unable to serialize tool response."}';
 const TERMINAL_JOB_STATES = new Set<JobStatus['state']>(['done', 'error', 'cancelled', 'expired']);
 const zenLoginCoordinator = new ZenLoginCoordinator();
 
@@ -83,6 +85,53 @@ async function client(): Promise<{ api: ZenAgentClient; email?: string }> {
 
 function requestAbortedError(signal: AbortSignal): Error {
   return signal.reason instanceof Error ? signal.reason : new Error('Request aborted');
+}
+
+function createAgentWaitSignal(requestSignal?: AbortSignal): {
+  signal: AbortSignal;
+  dispose: () => void;
+} {
+  const controller = new AbortController();
+  const onRequestAbort = () => controller.abort(requestSignal?.reason);
+  if (requestSignal?.aborted) onRequestAbort();
+  else requestSignal?.addEventListener('abort', onRequestAbort, { once: true });
+  const deadlineTimer = setTimeout(() => {
+    controller.abort(new Error(AGENT_WAIT_TIMEOUT_MESSAGE));
+  }, AGENT_WAIT_DEADLINE_MS);
+
+  return {
+    signal: controller.signal,
+    dispose: () => {
+      clearTimeout(deadlineTimer);
+      requestSignal?.removeEventListener('abort', onRequestAbort);
+    },
+  };
+}
+
+function raceWithAbort<T>(action: () => Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) return Promise.reject(requestAbortedError(signal));
+  return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      signal.removeEventListener('abort', onAbort);
+      reject(requestAbortedError(signal));
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+    try {
+      action().then(
+        value => {
+          signal.removeEventListener('abort', onAbort);
+          resolve(value);
+        },
+        error => {
+          signal.removeEventListener('abort', onAbort);
+          reject(error);
+        },
+      );
+    } catch (error) {
+      signal.removeEventListener('abort', onAbort);
+      reject(error);
+    }
+  });
 }
 
 function delay(ms: number, signal?: AbortSignal): Promise<void> {
@@ -168,27 +217,24 @@ export async function handleAgentWait(
 ) {
   assertAllowedKeys(args, ['job_id']);
   const jobId = requiredString(args.job_id, 'job_id');
-  const { api } = await client();
-  const deadline = Date.now() + AGENT_WAIT_DEADLINE_MS;
-  let status = await api.agentStatus(jobId, requestSignal);
+  const wait = createAgentWaitSignal(requestSignal);
+  try {
+    const { api } = await raceWithAbort(client, wait.signal);
+    let status = await raceWithAbort(() => api.agentStatus(jobId, wait.signal), wait.signal);
 
-  while (status.state !== 'waiting_for_context' && !TERMINAL_JOB_STATES.has(status.state)) {
-    const remaining = deadline - Date.now();
-    if (remaining <= 0) {
-      throw new Error('agent_wait timed out after five minutes; the job remains active. Call agent_wait again, or use agent_status or cancel_agent.');
+    while (status.state !== 'waiting_for_context' && !TERMINAL_JOB_STATES.has(status.state)) {
+      await delay(AGENT_WAIT_POLL_INTERVAL_MS, wait.signal);
+      status = await raceWithAbort(() => api.agentStatus(jobId, wait.signal), wait.signal);
     }
-    await delay(Math.min(AGENT_WAIT_POLL_INTERVAL_MS, remaining), requestSignal);
-    if (Date.now() >= deadline) {
-      throw new Error('agent_wait timed out after five minutes; the job remains active. Call agent_wait again, or use agent_status or cancel_agent.');
-    }
-    status = await api.agentStatus(jobId, requestSignal);
-  }
 
-  if (status.state === 'done') {
-    const result = await api.agentResult(jobId, requestSignal);
-    return { ...status, result };
+    if (status.state === 'done') {
+      const result = await raceWithAbort(() => api.agentResult(jobId, wait.signal), wait.signal);
+      return { ...status, result };
+    }
+    return status;
+  } finally {
+    wait.dispose();
   }
-  return status;
 }
 
 export async function handleCancelAgent(args: Record<string, unknown>) {
@@ -310,7 +356,11 @@ export function serializeToolResponse(value: unknown): string {
     });
     return serialized ?? JSON.stringify(String(value));
   } catch {
-    return JSON.stringify(String(value));
+    try {
+      return JSON.stringify(String(value));
+    } catch {
+      return UNSERIALIZABLE_TOOL_RESPONSE;
+    }
   }
 }
 
