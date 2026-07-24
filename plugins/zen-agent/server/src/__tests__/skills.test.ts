@@ -60,7 +60,11 @@ describe('Zen Agent skills', () => {
     expect(content).toMatch(/must not narrate each poll/i);
     expect(content).toMatch(/must not print raw status JSON/i);
     expect(content).toMatch(/subagent.*default|default.*subagent/is);
-    expect(content).toMatch(/multi-agent support/i);
+    expect(content).toMatch(/host supports subagents|host subagent support/i);
+    expect(content).toMatch(/Codex\s+subagent in Codex/i);
+    expect(content).toMatch(/Claude Code subagent in Claude Code/i);
+    expect(content).toMatch(/Default host subagent orchestration/i);
+    expect(content).not.toMatch(/Default Codex subagent orchestration/i);
     expect(content).toMatch(/fallback.*workflow|workflow.*fallback/is);
     expect(content).toMatch(/subagents? (?:are|is) (?:an orchestration preference|optional)/i);
     expect(content).toMatch(/concise parent summary/i);

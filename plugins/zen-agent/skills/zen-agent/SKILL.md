@@ -27,10 +27,11 @@ sees only the task and context that the local main agent explicitly sends.
    `zen-login` skill. Never collect credentials through Zen Agent.
 2. Form a narrow task. Include only useful initial context, within these limits:
    task 32 KiB, each item 64 KiB, one payload 256 KiB, and 1 MiB total per job.
-3. By default, when Codex multi-agent support is available, create one Codex
-   subagent and delegate the complete Zen Agent workflow to it. Give the
+3. By default, when the host supports subagents, create one host-native
+   subagent and delegate the complete Zen Agent workflow to it. Use a Codex
+   subagent in Codex and a Claude Code subagent in Claude Code. Give the
    subagent the narrow task and explicitly require a concise parent summary.
-4. If multi-agent support is unavailable, MCP tools are not inherited, or the
+4. If host subagent support is unavailable, MCP tools are not inherited, or the
    subagent cannot start, run the workflow in the current agent as a fallback:
    call `start_agent(task, initial_context?, agent?)` and retain the returned
    `job_id`. Omit `agent` for Codex, or set it to `claude` for that task.
@@ -53,17 +54,18 @@ ad-hoc shell polling scripts, must not narrate each poll, and must not print raw
 Return only a concise final summary after the job reaches a terminal state or
 cannot proceed safely.
 
-### Default Codex subagent orchestration
+### Default host subagent orchestration
 
-When host multi-agent support is available, subagent orchestration is the default
-host-side UX path for Zen Agent jobs, including short jobs. The parent agent
-should create one subagent, pass only the approved task/context, and ask for one
-concise summary. Subagents are an orchestration preference, not a correctness
-requirement: if the host cannot provide them or does not inherit MCP tools, use
-the direct fallback workflow above. The parent agent remains responsible for
-authentication, context authorization, result review, local patching, and tests.
-The subagent should use one `agent_wait` call per context round and return no raw
-polling output.
+When host subagent support is available, subagent orchestration is the default
+UX path for Zen Agent jobs, including short jobs. In Codex, create one Codex
+subagent; in Claude Code, create one Claude Code subagent. The parent agent
+should pass only the approved task/context and ask for one concise summary.
+Subagents are an orchestration preference, not a correctness requirement: if
+the host cannot provide them or does not inherit MCP tools, use the direct
+fallback workflow above. The parent agent remains responsible for
+authentication, context authorization, result review, local patching, and
+tests. The subagent should use one `agent_wait` call per context round and
+return no raw polling output.
 
 ## Context authorization
 
