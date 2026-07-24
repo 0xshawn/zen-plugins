@@ -46,7 +46,8 @@ approves context for a specific Zen agent task.
 `agent_wait` is the quiet default workflow: after `start_agent`, call it once
 per context round. If the job requests context, review the request locally,
 send the smallest authorized excerpt with `provide_context`, and call
-`agent_wait` again. A completed job includes its terminal result, so normal
+`agent_wait` again.
+A job that reaches state `done` includes its terminal result, so normal
 operation does not require a separate polling loop or `agent_result` call.
 Hosts should not run shell wrappers or narrate each poll; return a concise final
 summary instead.
