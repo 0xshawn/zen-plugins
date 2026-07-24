@@ -1,14 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  AGENT_WAIT_DEADLINE_MS,
+  AGENT_WAIT_POLL_INTERVAL_MS,
   handleAgentResult,
   handleAgentStatus,
   handleAuthStatus,
+  handleAgentWait,
   handleCancelAgent,
   handleListAgents,
   handleProvideContext,
   handleStartAgent,
   handleZenLogin,
+  serializeToolResponse,
   SERVER_NAME,
   toolDefinitions,
 } from '../index.js';
@@ -37,6 +41,13 @@ vi.mock('../api.js', () => ({
   ZenDeviceClient: vi.fn(),
 }));
 
+async function flushMicrotasks(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
 describe('Zen Agent MCP handlers', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -55,7 +66,7 @@ describe('Zen Agent MCP handlers', () => {
     expect(SERVER_NAME).toBe('zen-agent');
   });
 
-  it('advertises exactly the eight Zen agent tools', () => {
+  it('advertises exactly the nine Zen agent tools', () => {
     expect(toolDefinitions.map(tool => tool.name)).toEqual([
       'zen_login',
       'auth_status',
@@ -63,9 +74,20 @@ describe('Zen Agent MCP handlers', () => {
       'agent_status',
       'provide_context',
       'agent_result',
+      'agent_wait',
       'cancel_agent',
       'list_agents',
     ]);
+  });
+
+  it('exposes agent_wait with only a required job id', () => {
+    const wait = toolDefinitions.find(tool => tool.name === 'agent_wait')!;
+    expect(wait.inputSchema).toEqual({
+      type: 'object',
+      properties: { job_id: { type: 'string' } },
+      required: ['job_id'],
+      additionalProperties: false,
+    });
   });
 
   it('describes auth_status as validating the existing Zen session', () => {
@@ -155,6 +177,159 @@ describe('Zen Agent MCP handlers', () => {
     expect(ZenAgentClient).toHaveBeenCalledWith('http://zen', 'session');
   });
 
+  it('waits through queued and running states, then fetches one terminal result', async () => {
+    vi.useFakeTimers();
+    try {
+      const signal = new AbortController().signal;
+      const done = { job_id: 'job-1', agent: 'codex' as const, state: 'done' as const, elapsed_ms: 12 };
+      apiMocks.agentStatus
+        .mockResolvedValueOnce({ job_id: 'job-1', state: 'queued' as const })
+        .mockResolvedValueOnce({ job_id: 'job-1', state: 'running' as const })
+        .mockResolvedValueOnce(done);
+      apiMocks.agentResult.mockResolvedValueOnce({
+        summary: 'finished', findings: [], tests: [], assumptions: [], remaining_questions: [],
+      });
+
+      const pending = handleAgentWait({ job_id: 'job-1' }, signal);
+      await flushMicrotasks();
+      expect(apiMocks.agentStatus).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(AGENT_WAIT_POLL_INTERVAL_MS);
+      await flushMicrotasks();
+      await vi.advanceTimersByTimeAsync(AGENT_WAIT_POLL_INTERVAL_MS);
+
+      await expect(pending).resolves.toEqual({
+        ...done,
+        result: {
+          summary: 'finished', findings: [], tests: [], assumptions: [], remaining_questions: [],
+        },
+      });
+      expect(apiMocks.agentStatus).toHaveBeenCalledTimes(3);
+      expect(ZenAgentClient).toHaveBeenCalledTimes(1);
+      const waitSignal = apiMocks.agentStatus.mock.calls[0]?.[1];
+      expect(waitSignal).toBeInstanceOf(AbortSignal);
+      expect(waitSignal).not.toBe(signal);
+      expect(apiMocks.agentStatus.mock.calls[1]?.[1]).toBe(waitSignal);
+      expect(apiMocks.agentStatus.mock.calls[2]?.[1]).toBe(waitSignal);
+      expect(apiMocks.agentResult).toHaveBeenCalledTimes(1);
+      expect(apiMocks.agentResult.mock.calls[0]?.[1]).toBe(waitSignal);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('returns waiting_for_context without fetching a result', async () => {
+    apiMocks.agentStatus.mockResolvedValueOnce({
+      job_id: 'job-1', state: 'waiting_for_context' as const,
+      context_request: { request_id: 'ctx-1', reason: 'need diff', requests: [] },
+    });
+
+    await expect(handleAgentWait({ job_id: 'job-1' })).resolves.toEqual({
+      job_id: 'job-1', state: 'waiting_for_context',
+      context_request: { request_id: 'ctx-1', reason: 'need diff', requests: [] },
+    });
+    expect(apiMocks.agentResult).not.toHaveBeenCalled();
+    expect(apiMocks.agentStatus).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['error', 'cancelled', 'expired'] as const)(
+    'returns %s without fetching a result', async state => {
+      apiMocks.agentStatus.mockResolvedValueOnce({ job_id: 'job-1', state });
+
+      await expect(handleAgentWait({ job_id: 'job-1' })).resolves.toEqual({ job_id: 'job-1', state });
+      expect(apiMocks.agentResult).not.toHaveBeenCalled();
+      expect(apiMocks.agentStatus).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it('waits between running polls and rejects at the bounded deadline', async () => {
+    vi.useFakeTimers();
+    try {
+      apiMocks.agentStatus.mockResolvedValue({ job_id: 'job-1', state: 'running' as const });
+      const pending = handleAgentWait({ job_id: 'job-1' });
+      const rejected = expect(pending).rejects.toThrow(/timed out.*job remains active/i);
+      await flushMicrotasks();
+      expect(apiMocks.agentStatus).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(AGENT_WAIT_POLL_INTERVAL_MS);
+      expect(apiMocks.agentStatus).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(AGENT_WAIT_DEADLINE_MS - AGENT_WAIT_POLL_INTERVAL_MS);
+
+      await rejected;
+      expect(apiMocks.agentStatus).toHaveBeenCalledTimes(AGENT_WAIT_DEADLINE_MS / AGENT_WAIT_POLL_INTERVAL_MS);
+      expect(apiMocks.cancelAgent).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('rejects an aborted wait during the poll delay without another status request', async () => {
+    vi.useFakeTimers();
+    try {
+      const controller = new AbortController();
+      apiMocks.agentStatus.mockResolvedValueOnce({ job_id: 'job-1', state: 'running' as const });
+      const pending = handleAgentWait({ job_id: 'job-1' }, controller.signal);
+      await flushMicrotasks();
+      expect(apiMocks.agentStatus).toHaveBeenCalledTimes(1);
+
+      controller.abort();
+      await expect(pending).rejects.toThrow(/abort/i);
+      expect(apiMocks.agentStatus).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('times out a stalled initial status request without cancelling the remote job', async () => {
+    vi.useFakeTimers();
+    try {
+      apiMocks.agentStatus.mockImplementationOnce(() => new Promise(() => undefined));
+      const pending = handleAgentWait({ job_id: 'job-1' });
+      const rejected = expect(pending).rejects.toThrow(/timed out.*job remains active/i);
+      await flushMicrotasks();
+
+      await vi.advanceTimersByTimeAsync(AGENT_WAIT_DEADLINE_MS);
+      await rejected;
+      expect(apiMocks.agentStatus).toHaveBeenCalledTimes(1);
+      expect(apiMocks.cancelAgent).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('times out a stalled terminal result request without cancelling the remote job', async () => {
+    vi.useFakeTimers();
+    try {
+      apiMocks.agentStatus.mockResolvedValueOnce({ job_id: 'job-1', state: 'done' as const });
+      apiMocks.agentResult.mockImplementationOnce(() => new Promise(() => undefined));
+      const pending = handleAgentWait({ job_id: 'job-1' });
+      const rejected = expect(pending).rejects.toThrow(/timed out.*job remains active/i);
+      await flushMicrotasks();
+
+      await vi.advanceTimersByTimeAsync(AGENT_WAIT_DEADLINE_MS);
+      await rejected;
+      expect(apiMocks.agentStatus).toHaveBeenCalledTimes(1);
+      expect(apiMocks.agentResult).toHaveBeenCalledTimes(1);
+      expect(apiMocks.cancelAgent).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('serializes tool output compactly and handles non-JSON values', () => {
+    expect(serializeToolResponse({ state: 'done', result: { summary: 'ok' } }))
+      .toBe(JSON.stringify({ state: 'done', result: { summary: 'ok' } }));
+    expect(serializeToolResponse({ token_count: 2n })).toBe('{"token_count":"2"}');
+  });
+
+  it('returns a compact fallback when tool output cannot be serialized', () => {
+    const value = {
+      toJSON: () => { throw new Error('cannot serialize'); },
+      toString: () => { throw new Error('cannot stringify'); },
+    };
+    expect(() => serializeToolResponse(value)).not.toThrow();
+    expect(serializeToolResponse(value)).toBe('{"error":"Unable to serialize tool response."}');
+  });
+
   it('sends an explicit Claude selection and preserves the response agent', async () => {
     apiMocks.startAgent.mockResolvedValueOnce({ job_id: 'job-2', state: 'queued', agent: 'claude' });
 
@@ -192,6 +367,7 @@ describe('Zen Agent MCP handlers', () => {
     await expect(handleZenLogin({ email: 'u@example.com' })).rejects.toThrow(/unexpected.*email/i);
     await expect(handleStartAgent({ task: 'review', provider: 'codex' } as never)).rejects.toThrow(/unexpected.*provider/i);
     await expect(handleAgentStatus({ job_id: 'job-1', email: 'u@example.com' } as never)).rejects.toThrow(/unexpected.*email/i);
+    await expect(handleAgentWait({ job_id: 'job-1', mode: 'full' } as never)).rejects.toThrow(/unexpected.*mode/i);
     await expect(handleAuthStatus({ password: 'secret' } as never)).rejects.toThrow(/unexpected.*password/i);
     await expect(handleListAgents({ mode: 'full' } as never)).rejects.toThrow(/unexpected.*mode/i);
   });

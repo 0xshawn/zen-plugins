@@ -36,6 +36,7 @@ describe('Zen Agent skills', () => {
     for (const tool of [
       'auth_status',
       'start_agent',
+      'agent_wait',
       'agent_status',
       'provide_context',
       'agent_result',
@@ -54,5 +55,11 @@ describe('Zen Agent skills', () => {
     expect(content).toMatch(/apply.*patch.*local|patch.*appl.*local/is);
     expect(content).toMatch(/run.*test.*local|local.*test/is);
     expect(content).toMatch(/cancel_agent/);
+    expect(content).toMatch(/one (?:`?agent_wait`? )?call per context round/i);
+    expect(content).toMatch(/must not run [`']?\/tmp\/\*\.mjs[`']? wrappers?/i);
+    expect(content).toMatch(/must not narrate each poll/i);
+    expect(content).toMatch(/must not print raw status JSON/i);
+    expect(content).toMatch(/subagents? (?:are|is) optional/i);
+    expect(content).toMatch(/concise parent summary/i);
   });
 });

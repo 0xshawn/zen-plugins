@@ -176,8 +176,8 @@ export class ZenAgentClient {
     return this.request('/api/agent/jobs', { method: 'POST', body: JSON.stringify(payload) });
   }
 
-  agentStatus(jobId: string): Promise<JobStatus> {
-    return this.request(`/api/agent/jobs/${encodeURIComponent(jobId)}`);
+  agentStatus(jobId: string, signal?: AbortSignal): Promise<JobStatus> {
+    return this.request(`/api/agent/jobs/${encodeURIComponent(jobId)}`, { signal });
   }
 
   provideContext(jobId: string, body: ProvideContextRequest): Promise<void> {
@@ -187,8 +187,8 @@ export class ZenAgentClient {
     });
   }
 
-  agentResult(jobId: string): Promise<AgentResult> {
-    return this.request(`/api/agent/jobs/${encodeURIComponent(jobId)}/result`);
+  agentResult(jobId: string, signal?: AbortSignal): Promise<AgentResult> {
+    return this.request(`/api/agent/jobs/${encodeURIComponent(jobId)}/result`, { signal });
   }
 
   cancelAgent(jobId: string): Promise<void> {
